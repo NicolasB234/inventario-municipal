@@ -16,6 +16,7 @@ const statusOptions = [
     { value: 'B', label: 'De Baja' }
 ];
 
+// Se mantiene la estructura original anidada para estas funciones
 function getShortNameNodesMap() {
     const map = new Map();
     function traverse(nodes) {
@@ -48,13 +49,10 @@ function getFullPathNodesMap() {
 
 let currentFormSubmitHandler = null;
 
-function showItemForm(node, item = null) {
+export function showItemForm(node, item = null) {
     const modal = document.getElementById('modal-agregar-item');
     const form = document.getElementById('form-agregar-item');
-    if (!modal || !form) {
-        console.error("El modal o el formulario para ítems no se encontraron en el DOM.");
-        return;
-    }
+    if (!modal || !form) return;
 
     const isEditing = item !== null;
     form.reset();
@@ -111,7 +109,6 @@ function showItemForm(node, item = null) {
                 const action = isEditing ? 'item_edited' : 'item_added';
                 const message = isEditing ? `Ítem "${formData.get('name')}" editado.` : `Nuevo ítem "${formData.get('name')}" añadido.`;
                 addNotification(action, message, sessionStorage.getItem('username'));
-                
                 closeItemForm();
                 displayInventory(node, sessionStorage.getItem('isAdmin') === 'true');
             } else {
@@ -123,11 +120,10 @@ function showItemForm(node, item = null) {
         }
     };
     form.addEventListener('submit', currentFormSubmitHandler);
-
     modal.style.display = 'flex';
 }
 
-function closeItemForm() {
+export function closeItemForm() {
     const modal = document.getElementById('modal-agregar-item');
     if (modal) {
         modal.style.display = 'none';
@@ -148,7 +144,6 @@ function showTransferForm(node, items) {
         alert('No hay ítems en esta área para traspasar.');
         return;
     }
-
     if (document.getElementById('transfer-modal')) return;
 
     const modalOverlay = document.createElement('div');
@@ -169,28 +164,16 @@ function showTransferForm(node, items) {
             <button class="close-modal" id="cancel-transfer-btn-x">&times;</button>
             <h3>Traspaso de Ítem</h3>
             <form id="transfer-form">
-                <div class="form-row">
-                    <label>Área Origen:</label>
-                    <input type="text" value="${node.name}" disabled>
-                </div>
-                <div class="form-row">
-                    <label for="item-to-transfer">Ítem a Traspasar:</label>
-                    <select id="item-to-transfer" name="itemId" required>
-                        <option value="" disabled selected>Seleccione un ítem...</option>
-                        ${items.map(item => `<option value="${item.id}">${item.name} (ID: ${item.id})</option>`).join('')}
-                    </select>
-                </div>
-                <div class="form-row">
-                    <label for="destination-area">Área de Destino:</label>
-                    <select id="destination-area" name="destinationNodeId" required>
-                        <option value="" disabled selected>Seleccione un destino...</option>
-                        ${allNodes.map(n => `<option value="${n.id}">${n.name}</option>`).join('')}
-                    </select>
-                </div>
-                <div class="form-row">
-                    <label for="transfer-reason">Motivo del Traspaso:</label>
-                    <textarea id="transfer-reason" name="reason" rows="3" placeholder="Especifique el motivo del traspaso..." required></textarea>
-                </div>
+                <div class="form-row"><label>Área Origen:</label><input type="text" value="${node.name}" disabled></div>
+                <div class="form-row"><label for="item-to-transfer">Ítem a Traspasar:</label><select id="item-to-transfer" name="itemId" required>
+                    <option value="" disabled selected>Seleccione un ítem...</option>
+                    ${items.map(item => `<option value="${item.id}">${item.name} (ID: ${item.id})</option>`).join('')}
+                </select></div>
+                <div class="form-row"><label for="destination-area">Área de Destino:</label><select id="destination-area" name="destinationNodeId" required>
+                    <option value="" disabled selected>Seleccione un destino...</option>
+                    ${allNodes.map(n => `<option value="${n.id}">${n.name}</option>`).join('')}
+                </select></div>
+                <div class="form-row"><label for="transfer-reason">Motivo del Traspaso:</label><textarea id="transfer-reason" name="reason" rows="3" placeholder="Especifique el motivo del traspaso..." required></textarea></div>
                 <div class="form-row" style="flex-direction: row; justify-content: flex-end; gap: 10px;">
                     <button type="button" id="cancel-transfer-btn" class="button">Cancelar</button>
                     <button type="submit" class="button">Confirmar Traspaso</button>
@@ -204,27 +187,18 @@ function showTransferForm(node, items) {
     const closeModal = () => modalOverlay.remove();
     document.getElementById('cancel-transfer-btn').onclick = closeModal;
     document.getElementById('cancel-transfer-btn-x').onclick = closeModal;
-    modalOverlay.onclick = (e) => {
-        if (e.target === modalOverlay) closeModal();
-    };
+    modalOverlay.onclick = (e) => { if (e.target === modalOverlay) closeModal(); };
 
     document.getElementById('transfer-form').addEventListener('submit', async (e) => {
         e.preventDefault();
         const formData = new FormData(e.target);
         const itemName = e.target.querySelector('#item-to-transfer option:checked').text;
         const destinationName = e.target.querySelector('#destination-area option:checked').text;
-
-        if (!confirm(`¿Está seguro de traspasar el ítem "${itemName}" al área "${destinationName}"?`)) {
-            return;
-        }
+        if (!confirm(`¿Está seguro de traspasar el ítem "${itemName}" al área "${destinationName}"?`)) return;
 
         try {
-            const response = await fetch(`${API_URL}transfer_item.php`, {
-                method: 'POST',
-                body: formData
-            });
+            const response = await fetch(`${API_URL}transfer_item.php`, { method: 'POST', body: formData });
             const result = await response.json();
-
             if (result.success) {
                 const reason = formData.get('reason');
                 const notifMessage = `Ítem "${itemName}" traspasado de "${node.name}" a "${destinationName}". Motivo: ${reason}`;
@@ -262,7 +236,6 @@ function exportToXLSX(node, items) {
     const worksheet = XLSX.utils.json_to_sheet(dataToExport);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Inventario");
-
     XLSX.writeFile(workbook, `inventario_${node.id || 'global'}.xlsx`);
 }
 
@@ -293,6 +266,8 @@ export async function displayInventory(node, isAdmin = false) {
 function setupInventoryUI(node, items, isAdmin) {
     const controlsContainer = document.getElementById('global-controls-container');
     if (!controlsContainer) return;
+
+    // **LÓGICA DE FILTROS RESTAURADA**
     controlsContainer.innerHTML = `
         <div class="inventory-controls">
             <button id="add-item-btn"><i class="fas fa-plus"></i> Agregar Item</button>
@@ -303,18 +278,69 @@ function setupInventoryUI(node, items, isAdmin) {
             <button id="toggle-filters-btn"><i class="fas fa-filter"></i> Mostrar Filtros</button>
         </div>
         <div class="filter-controls-container">
+            <div class="filter-row"><label for="filter-id">Buscar por ID:</label><input type="text" id="filter-id" placeholder="ID del ítem"></div>
+            <div class="filter-row"><label for="filter-name">Buscar por Nombre:</label><input type="text" id="filter-name" placeholder="Nombre del ítem"></div>
+            <div class="filter-row"><label for="filter-category">Categoría:</label><select id="filter-category"><option value="">Todas</option>${categories.map(cat => `<option value="${cat}">${cat}</option>`).join('')}</select></div>
+            <div class="filter-row"><label for="filter-status">Estado:</label><select id="filter-status"><option value="">Todos</option>${statusOptions.map(option => `<option value="${option.value}">${option.label}</option>`).join('')}</select></div>
+            <div class="filter-row"><label for="filter-date-from">Adquirido Desde:</label><input type="date" id="filter-date-from"></div>
+            <div class="filter-row"><label for="filter-date-to">Adquirido Hasta:</label><input type="date" id="filter-date-to"></div>
+            <div class="filter-actions">
+                <button id="apply-filters-btn" class="button"><i class="fas fa-check"></i> Aplicar</button>
+                <button id="reset-filters-btn" class="button reset-filters-btn"><i class="fas fa-undo"></i> Limpiar</button>
             </div>
+        </div>
     `;
 
     document.getElementById("add-item-btn").addEventListener('click', () => showItemForm(node, null));
     document.getElementById("transfer-item-btn").addEventListener('click', () => showTransferForm(node, items));
     document.getElementById("export-xlsx-btn").addEventListener('click', () => exportToXLSX(node, items));
     
+    // **EVENT LISTENERS DE FILTROS RESTAURADOS**
+    const filterControls = controlsContainer.querySelector('.filter-controls-container');
+    document.getElementById('toggle-filters-btn').addEventListener('click', () => {
+        filterControls.classList.toggle('visible');
+        const button = document.getElementById('toggle-filters-btn');
+        button.innerHTML = filterControls.classList.contains('visible') 
+            ? '<i class="fas fa-eye-slash"></i> Ocultar Filtros' 
+            : '<i class="fas fa-filter"></i> Mostrar Filtros';
+    });
+    
+    document.getElementById('apply-filters-btn').addEventListener('click', () => {
+        const filters = {
+            id: document.getElementById('filter-id').value.trim(),
+            name: document.getElementById('filter-name').value.toLowerCase().trim(),
+            category: document.getElementById('filter-category').value,
+            status: document.getElementById('filter-status').value,
+            dateFrom: document.getElementById('filter-date-from').value,
+            dateTo: document.getElementById('filter-date-to').value,
+        };
+        const filteredItems = items.filter(item => {
+            const itemDate = item.acquisitionDate ? new Date(item.acquisitionDate) : null;
+            const fromDate = filters.dateFrom ? new Date(filters.dateFrom) : null;
+            const toDate = filters.dateTo ? new Date(filters.dateTo) : null;
+            if(itemDate) itemDate.setUTCHours(0, 0, 0, 0);
+            if(fromDate) fromDate.setUTCHours(0, 0, 0, 0);
+            if(toDate) toDate.setUTCHours(0, 0, 0, 0);
+            
+            return (!filters.id || String(item.id).includes(filters.id)) &&
+                   (!filters.name || item.name.toLowerCase().includes(filters.name)) &&
+                   (!filters.category || item.category === filters.category) &&
+                   (!filters.status || item.status === filters.status) &&
+                   (!fromDate || (itemDate && itemDate >= fromDate)) &&
+                   (!toDate || (itemDate && itemDate <= toDate));
+        });
+        renderTable(node, filteredItems, isAdmin);
+    });
+
+    document.getElementById('reset-filters-btn').addEventListener('click', () => {
+        filterControls.querySelectorAll('input, select').forEach(el => el.value = '');
+        renderTable(node, items, isAdmin);
+    });
+
+    // **LÓGICA DE IMPORTACIÓN**
     const importBtn = document.getElementById('import-xlsx-btn');
     const fileInput = document.getElementById('xlsx-file-input');
-
     importBtn.addEventListener('click', () => fileInput.click());
-
     fileInput.addEventListener('change', (event) => {
         const file = event.target.files[0];
         if (!file) return;
@@ -327,16 +353,12 @@ function setupInventoryUI(node, items, isAdmin) {
                 const firstSheetName = workbook.SheetNames[0];
                 const worksheet = workbook.Sheets[firstSheetName];
                 const json = XLSX.utils.sheet_to_json(worksheet);
-
                 if (json.length === 0) {
                     alert('El archivo XLSX está vacío.');
                     return;
                 }
                 
-                const mappedJson = json.map(row => {
-                    // Ignora filas si no tienen contenido
-                    if (Object.keys(row).length === 0) return null;
-
+                const mappedJson = json.filter(row => Object.keys(row).length > 0).map(row => {
                     const newRow = {};
                     for (const key in row) {
                         const lowerKey = key.toLowerCase().trim();
@@ -345,21 +367,19 @@ function setupInventoryUI(node, items, isAdmin) {
                         else if (lowerKey.startsWith('categor')) newRow.categoria = row[key];
                         else if (lowerKey.startsWith('descripci')) newRow.descripcion = row[key];
                         else if (lowerKey.startsWith('fecha')) {
-                            // Procesa fechas de forma más segura
                             if (row[key] instanceof Date && !isNaN(row[key])) {
                                 const date = row[key];
                                 const tzoffset = date.getTimezoneOffset() * 60000;
-                                const localISOTime = (new Date(date - tzoffset)).toISOString().slice(0, 10);
-                                newRow.fechaadquisicion = localISOTime;
+                                newRow.fechaadquisicion = (new Date(date - tzoffset)).toISOString().slice(0, 10);
                             } else {
                                 newRow.fechaadquisicion = null;
                             }
                         }
                         else if (lowerKey.startsWith('estado')) newRow.estado = row[key];
-                        else if (lowerKey.startsWith('area') || lowerKey.startsWith('área')) newRow.area = row[key];
+                        else if (lowerKey.startsWith('area')) newRow.area = row[key];
                     }
                     return newRow;
-                }).filter(row => row !== null); // Filtra las filas vacías
+                });
 
                 const response = await fetch(`${API_URL}bulk_import.php`, {
                     method: 'POST',
@@ -368,7 +388,6 @@ function setupInventoryUI(node, items, isAdmin) {
                 });
 
                 if (!response.ok) {
-                    // Si el servidor responde con un error (ej: 500), intenta leer el mensaje
                     const errorResult = await response.json().catch(() => ({ message: response.statusText }));
                     throw new Error(errorResult.message || 'Error desconocido del servidor.');
                 }
@@ -389,50 +408,35 @@ function setupInventoryUI(node, items, isAdmin) {
         reader.readAsArrayBuffer(file);
         fileInput.value = '';
     });
-    
-    // ...resto de la lógica de filtros y tabla...
 }
 
 function renderTable(node, items, isAdmin) {
     const tableContainer = document.getElementById('table-view');
     if (!tableContainer) return;
     tableContainer.innerHTML = '';
-
+    
     const isAllAreasView = isAdmin && node.id === '';
     
     if (items.length === 0) {
-        tableContainer.innerHTML = '<p>No se encontraron ítems que coincidan con los filtros o el área está vacía.</p>';
+        tableContainer.innerHTML = '<p>No hay ítems en esta área o no coinciden con los filtros.</p>';
         return;
     }
 
     tableContainer.innerHTML = `
         <div class="table-responsive">
             <table id="inventory-table" class="inventory-table">
-                <thead>
-                    <tr>
-                        <th>ID</th>
-                        ${isAllAreasView ? '<th>Área</th>' : ''}
-                        <th>Imagen</th>
-                        <th>Nombre</th>
-                        <th>Cantidad</th>
-                        <th>Categoría</th>
-                        <th>Descripción</th>
-                        <th>Estado</th>
-                        <th>Acciones</th>
-                    </tr>
-                </thead>
+                <thead><tr>
+                    <th>ID</th>
+                    ${isAllAreasView ? '<th>Área</th>' : ''}
+                    <th>Imagen</th><th>Nombre</th><th>Cantidad</th><th>Categoría</th><th>Descripción</th><th>Estado</th><th>Acciones</th>
+                </tr></thead>
                 <tbody>
                     ${items.map(item => `
                         <tr>
                             <td>${item.id}</td>
                             ${isAllAreasView ? `<td>${nodesMap.get(item.node_id) || 'N/A'}</td>` : ''}
-                            <td>
-                                <img src="${item.imagePath || 'img/placeholder.png'}" alt="${item.name}" class="inventory-thumbnail" style="width:50px; height:50px; object-fit:cover;">
-                            </td>
-                            <td>${item.name}</td>
-                            <td>${item.quantity}</td>
-                            <td>${item.category}</td>
-                            <td>${item.description || ''}</td>
+                            <td><img src="${item.imagePath || 'img/placeholder.png'}" alt="${item.name}" class="inventory-thumbnail" style="width:50px; height:50px; object-fit:cover;"></td>
+                            <td>${item.name}</td><td>${item.quantity}</td><td>${item.category}</td><td>${item.description || ''}</td>
                             <td>${statusOptions.find(s => s.value === item.status)?.label || 'Desconocido'}</td>
                             <td class="actions">
                                 <button class="edit-btn" data-item-id="${item.id}"><i class="fas fa-edit"></i></button>
@@ -484,9 +488,7 @@ function renderTable(node, items, isAdmin) {
             document.body.appendChild(modalOverlay);
             const close = () => modalOverlay.remove();
             modalOverlay.querySelector('.close-modal').onclick = close;
-            modalOverlay.onclick = (e) => {
-                if (e.target === modalOverlay) close();
-            };
+            modalOverlay.onclick = (e) => { if (e.target === modalOverlay) close(); };
         });
     });
 }

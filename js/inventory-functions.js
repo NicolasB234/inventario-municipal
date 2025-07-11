@@ -4,8 +4,8 @@ import { orgStructure } from './org-structure.js';
 const API_URL = 'php/';
 
 const categories = [
-    'Informática', 'Electrónica', 'Mobiliario', 'Vehículos', 'Equipamiento', 
-    'Herramientas', 'Materiales', 'Oficina', 'Otros electrónicos', 'Servicios', 
+    'Informática', 'Electrónica', 'Mobiliario', 'Vehículos', 'Equipamiento',
+    'Herramientas', 'Materiales', 'Oficina', 'Otros electrónicos', 'Servicios',
     'Mobiliario Depósito', 'Equipamiento Logístico', 'Equipamiento Oficina'
 ];
 
@@ -16,76 +16,139 @@ const statusOptions = [
     { value: 'B', label: 'De Baja' }
 ];
 
-// **FUNCIÓN CORREGIDA**
-// Ahora mapea el ID del nodo directamente a su nombre específico.
-function getAllNodesMap() {
-    const nodesMap = new Map();
+// **CORRECCIÓN: Esta función ahora solo mapea el ID al nombre corto.**
+// Se usará para mostrar el nombre del área en la tabla.
+function getShortNameNodesMap() {
+    const map = new Map();
     function traverse(nodes) {
         nodes.forEach(node => {
-            nodesMap.set(node.id, node.name); // Guarda solo el nombre del área, no la ruta completa.
+            map.set(node.id, node.name); // Mapea ID -> Nombre Corto
             if (node.children && node.children.length > 0) {
                 traverse(node.children);
             }
         });
     }
     traverse(orgStructure);
-    return nodesMap;
+    return map;
 }
-const nodesMap = getAllNodesMap();
+const nodesMap = getShortNameNodesMap(); // Este es el mapa para la UI.
 
 
-function exportToCSV(node, items) {
-    if (items.length === 0) {
-        alert('No hay datos en esta área para exportar.');
+// **NUEVA FUNCIÓN: Crea un mapa con la ruta completa para la exportación a CSV.**
+function getFullPathNodesMap() {
+    const map = new Map();
+    function traverse(nodes, path = []) {
+        nodes.forEach(node => {
+            const currentPath = [...path, node.name];
+            map.set(node.id, currentPath.join(' > ')); // Mapea ID -> Ruta Completa
+            if (node.children && node.children.length > 0) {
+                traverse(node.children, currentPath);
+            }
+        });
+    }
+    traverse(orgStructure);
+    return map;
+}
+
+
+let currentFormSubmitHandler = null;
+
+function showItemForm(node, item = null) {
+    const modal = document.getElementById('modal-agregar-item');
+    const form = document.getElementById('form-agregar-item');
+    if (!modal || !form) {
+        console.error("El modal o el formulario para ítems no se encontraron en el DOM.");
         return;
     }
-    const headers = ['ID', 'Nombre', 'Cantidad', 'Categoría', 'Descripción', 'Fecha Adquisición', 'Estado', 'Area'];
-    const csvRows = [];
-    csvRows.push(headers.join(','));
-    for (const item of items) {
-        const values = [
-            item.id,
-            `"${item.name.replace(/"/g, '""')}"`,
-            item.quantity,
-            item.category,
-            `"${(item.description || '').replace(/"/g, '""')}"`,
-            item.acquisitionDate,
-            statusOptions.find(s => s.value === item.status)?.label || item.status,
-            nodesMap.get(item.node_id) || 'N/A'
-        ];
-        csvRows.push(values.join(','));
+
+    const isEditing = item !== null;
+    form.reset();
+
+    modal.querySelector('h2').textContent = isEditing ? `Editar Ítem: ${item.name}` : 'Agregar Nuevo Ítem';
+    form.querySelector('[name="id"]').value = isEditing ? item.id : '';
+    form.querySelector('[name="node_id"]').value = node.id;
+    form.querySelector('[name="existingImagePath"]').value = isEditing && item.imagePath ? item.imagePath : '';
+    form.querySelector('[name="name"]').value = isEditing ? item.name : '';
+    form.querySelector('[name="quantity"]').value = isEditing ? item.quantity : 1;
+    form.querySelector('[name="description"]').value = isEditing ? item.description : '';
+    form.querySelector('[name="acquisitionDate"]').value = isEditing ? item.acquisitionDate : '';
+
+    const categorySelect = form.querySelector('[name="category"]');
+    categorySelect.innerHTML = categories.map(cat => `<option value="${cat}" ${isEditing && item.category === cat ? 'selected' : ''}>${cat}</option>`).join('');
+
+    const statusSelect = form.querySelector('[name="status"]');
+    statusSelect.innerHTML = statusOptions.map(option => `<option value="${option.value}" ${isEditing && item.status === option.value ? 'selected' : ''}>${option.label}</option>`).join('');
+
+    const imagePreview = document.getElementById('imagePreview');
+    const imageInput = document.getElementById('form-itemImage');
+    imageInput.onchange = () => {
+        if (imageInput.files && imageInput.files[0]) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                imagePreview.src = e.target.result;
+                imagePreview.style.display = 'block';
+            };
+            reader.readAsDataURL(imageInput.files[0]);
+        }
+    };
+
+    if (isEditing && item.imagePath) {
+        imagePreview.src = item.imagePath;
+        imagePreview.style.display = 'block';
+    } else {
+        imagePreview.style.display = 'none';
+        imagePreview.src = '#';
     }
-    const csvString = csvRows.join('\n');
-    const blob = new Blob([`\uFEFF${csvString}`], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.setAttribute('download', `inventario_${node.id || 'global'}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+
+    if (currentFormSubmitHandler) {
+        form.removeEventListener('submit', currentFormSubmitHandler);
+    }
+
+    currentFormSubmitHandler = async (event) => {
+        event.preventDefault();
+        const formData = new FormData(form);
+        const endpoint = isEditing ? 'update_item.php' : 'add_item.php';
+        
+        try {
+            const response = await fetch(API_URL + endpoint, { method: 'POST', body: formData });
+            const result = await response.json();
+            if (result.success) {
+                const action = isEditing ? 'item_edited' : 'item_added';
+                const message = isEditing ? `Ítem "${formData.get('name')}" editado.` : `Nuevo ítem "${formData.get('name')}" añadido.`;
+                addNotification(action, message, sessionStorage.getItem('username'));
+                
+                closeItemForm();
+                displayInventory(node, sessionStorage.getItem('isAdmin') === 'true');
+            } else {
+                alert(`Error: ${result.message}`);
+            }
+        } catch (error) {
+            console.error('Error al guardar:', error);
+            alert('Error de conexión al guardar el ítem.');
+        }
+    };
+    form.addEventListener('submit', currentFormSubmitHandler);
+
+    modal.style.display = 'flex';
 }
 
-function parseCSV(csvString) {
-    const rows = csvString.split('\n').filter(row => row.trim() !== '');
-    const data = [];
-    if (rows.length < 2) return data;
-
-    const headers = rows.shift().toLowerCase().split(',').map(h => h.trim().replace(/"/g, '').normalize("NFD").replace(/[\u0300-\u036f]/g, ""));
-    
-    rows.forEach(row => {
-        const values = row.split(',');
-        if (values.length !== headers.length) return;
-
-        const item = {};
-        headers.forEach((header, index) => {
-            item[header] = values[index] ? values[index].trim().replace(/"/g, '') : '';
-        });
-        data.push(item);
-    });
-    return data;
+function closeItemForm() {
+    const modal = document.getElementById('modal-agregar-item');
+    if (modal) {
+        modal.style.display = 'none';
+    }
 }
 
-async function showTransferForm(node, items) {
+export function setupModalClosers() {
+    const modal = document.getElementById('modal-agregar-item');
+    if (modal) {
+        modal.querySelector('.close-modal').addEventListener('click', closeItemForm);
+        modal.querySelector('#cancel-item-btn').addEventListener('click', closeItemForm);
+        modal.addEventListener('click', (e) => { if (e.target === modal) closeItemForm(); });
+    }
+}
+
+function showTransferForm(node, items) {
     if (items.length === 0) {
         alert('No hay ítems en esta área para traspasar.');
         return;
@@ -97,19 +160,17 @@ async function showTransferForm(node, items) {
     modalOverlay.className = 'modal-overlay';
     modalOverlay.id = 'transfer-modal';
 
+    const fullPathMap = getFullPathNodesMap();
     let allNodes = [];
-    function traverse(nodes, path) {
-        nodes.forEach(n => {
-            if(n.id !== node.id && ['departamento', 'coordinacion', 'area', 'direction'].includes(n.type)) {
-                allNodes.push({id: n.id, name: [...path, n.name].join(' > ')});
-            }
-            if (n.children) traverse(n.children, [...path, n.name]);
-        });
+    for (const [id, name] of fullPathMap.entries()) {
+        if (id !== node.id) {
+            allNodes.push({ id, name });
+        }
     }
-    traverse(orgStructure, []);
+    allNodes.sort((a, b) => a.name.localeCompare(b.name));
 
     modalOverlay.innerHTML = `
-        <div class="modal-content" style="width: 500px; cursor: default;" onclick="(e) => e.stopPropagation()">
+        <div class="modal-content" style="width: 500px; cursor: default;">
             <button class="close-modal" id="cancel-transfer-btn-x">&times;</button>
             <h3>Traspaso de Ítem</h3>
             <form id="transfer-form">
@@ -136,8 +197,8 @@ async function showTransferForm(node, items) {
                     <textarea id="transfer-reason" name="reason" rows="3" placeholder="Especifique el motivo del traspaso..." required></textarea>
                 </div>
                 <div class="form-row" style="flex-direction: row; justify-content: flex-end; gap: 10px;">
-                    <button type="button" id="cancel-transfer-btn" class="reset-filters-btn">Cancelar</button>
-                    <button type="submit" class="apply-filters-btn">Confirmar Traspaso</button>
+                    <button type="button" id="cancel-transfer-btn" class="button">Cancelar</button>
+                    <button type="submit" class="button">Confirmar Traspaso</button>
                 </div>
             </form>
         </div>
@@ -149,16 +210,14 @@ async function showTransferForm(node, items) {
     document.getElementById('cancel-transfer-btn').onclick = closeModal;
     document.getElementById('cancel-transfer-btn-x').onclick = closeModal;
     modalOverlay.onclick = (e) => {
-        if(e.target === modalOverlay) closeModal();
+        if (e.target === modalOverlay) closeModal();
     };
 
     document.getElementById('transfer-form').addEventListener('submit', async (e) => {
         e.preventDefault();
         const formData = new FormData(e.target);
-        const currentUsername = sessionStorage.getItem('username');
         const itemName = e.target.querySelector('#item-to-transfer option:checked').text;
         const destinationName = e.target.querySelector('#destination-area option:checked').text;
-        const reason = formData.get('reason');
 
         if (!confirm(`¿Está seguro de traspasar el ítem "${itemName}" al área "${destinationName}"?`)) {
             return;
@@ -172,11 +231,12 @@ async function showTransferForm(node, items) {
             const result = await response.json();
 
             if (result.success) {
+                const reason = formData.get('reason');
                 const notifMessage = `Ítem "${itemName}" traspasado de "${node.name}" a "${destinationName}". Motivo: ${reason}`;
-                addNotification('item_transferred', notifMessage, currentUsername);
+                addNotification('item_transferred', notifMessage, sessionStorage.getItem('username'));
                 alert('Traspaso realizado con éxito.');
                 closeModal();
-                displayInventory(node);
+                displayInventory(node, sessionStorage.getItem('isAdmin') === 'true');
             } else {
                 alert(`Error en el traspaso: ${result.message}`);
             }
@@ -187,87 +247,37 @@ async function showTransferForm(node, items) {
     });
 }
 
-async function showItemForm(node, item = null) {
-    const modal = document.getElementById('modal-agregar-item');
-    const form = document.getElementById('form-agregar-item');
-    const modalTitle = modal.querySelector('h2');
-    const imagePreview = document.getElementById('imagePreview');
-    const imageInput = document.getElementById('form-itemImage');
-    const isEditing = item !== null;
-
-    form.reset();
-    modalTitle.textContent = isEditing ? `Editar Ítem: ${item.name}` : 'Agregar Nuevo Ítem';
-    
-    form.querySelector('[name="id"]').value = isEditing ? item.id : '';
-    form.querySelector('[name="node_id"]').value = node.id;
-    form.querySelector('[name="existingImagePath"]').value = isEditing && item.imagePath ? item.imagePath : '';
-    form.querySelector('[name="name"]').value = isEditing ? item.name : '';
-    form.querySelector('[name="quantity"]').value = isEditing ? item.quantity : 1;
-    form.querySelector('[name="description"]').value = isEditing ? item.description : '';
-    form.querySelector('[name="acquisitionDate"]').value = isEditing ? item.acquisitionDate : '';
-
-    const categorySelect = form.querySelector('[name="category"]');
-    categorySelect.innerHTML = categories.map(cat => `<option value="${cat}" ${isEditing && item.category === cat ? 'selected' : ''}>${cat}</option>`).join('');
-
-    const statusSelect = form.querySelector('[name="status"]');
-    statusSelect.innerHTML = statusOptions.map(option => `<option value="${option.value}" ${isEditing && item.status === option.value ? 'selected' : ''}>${option.label}</option>`).join('');
-
-    if (isEditing && item.imagePath) {
-        imagePreview.src = item.imagePath;
-        imagePreview.style.display = 'block';
-    } else {
-        imagePreview.style.display = 'none';
-        imagePreview.src = '#';
+// **Función para exportar a CSV actualizada para usar el mapa de rutas completas.**
+function exportToCSV(node, items) {
+    if (items.length === 0) {
+        alert('No hay datos en esta área para exportar.');
+        return;
     }
-    
-    const imageChangeHandler = () => {
-        if (imageInput.files && imageInput.files[0]) {
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                imagePreview.src = e.target.result;
-                imagePreview.style.display = 'block';
-            }
-            reader.readAsDataURL(imageInput.files[0]);
-        }
-    };
-    imageInput.addEventListener('change', imageChangeHandler);
-    
-    modal.style.display = 'flex';
-
-    const closeModal = () => {
-        modal.style.display = 'none';
-        imageInput.removeEventListener('change', imageChangeHandler);
-    };
-    modal.querySelector('.close-modal').onclick = closeModal;
-    modal.querySelector('#cancel-item-btn').onclick = closeModal;
-    modal.onclick = (e) => {
-        if (e.target === modal) closeModal();
-    };
-
-    form.onsubmit = async (event) => {
-        event.preventDefault();
-        const formData = new FormData(form);
-        const currentUsername = sessionStorage.getItem('username');
-        const endpoint = isEditing ? 'update_item.php' : 'add_item.php';
-
-        try {
-            const response = await fetch(API_URL + endpoint, { method: 'POST', body: formData });
-            const result = await response.json();
-            if (result.success) {
-                const action = isEditing ? 'item_edited' : 'item_added';
-                const message = isEditing ? `Ítem "${formData.get('name')}" editado en "${node.name}".` : `Nuevo ítem "${formData.get('name')}" añadido a "${node.name}".`;
-                addNotification(action, message, currentUsername);
-                
-                closeModal();
-                displayInventory(node, sessionStorage.getItem('isAdmin') === 'true');
-            } else {
-                alert(`Error: ${result.message}`);
-            }
-        } catch (error) {
-            console.error('Error al guardar:', error);
-            alert('Error de conexión al guardar el ítem.');
-        }
-    };
+    const fullPathMap = getFullPathNodesMap(); // Usa el mapa de rutas completas
+    const headers = ['ID', 'Nombre', 'Cantidad', 'Categoría', 'Descripción', 'Fecha Adquisición', 'Estado', 'Area'];
+    const csvRows = [];
+    csvRows.push(headers.join(','));
+    for (const item of items) {
+        const values = [
+            item.id,
+            `"${item.name.replace(/"/g, '""')}"`,
+            item.quantity,
+            item.category,
+            `"${(item.description || '').replace(/"/g, '""')}"`,
+            item.acquisitionDate,
+            statusOptions.find(s => s.value === item.status)?.label || item.status,
+            fullPathMap.get(item.node_id) || 'N/A' // Obtiene la ruta completa
+        ];
+        csvRows.push(values.join(','));
+    }
+    const csvString = csvRows.join('\n');
+    const blob = new Blob([`\uFEFF${csvString}`], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.setAttribute('download', `inventario_${node.id || 'global'}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
 }
 
 export async function displayInventory(node, isAdmin = false) {
@@ -283,8 +293,10 @@ export async function displayInventory(node, isAdmin = false) {
         
         if (result.success) {
             setupInventoryUI(node, result.data, isAdmin);
+            renderTable(node, result.data, isAdmin);
         } else {
             tableView.innerHTML = `<p>Error al cargar el inventario: ${result.message}</p>`;
+            document.getElementById('global-controls-container').innerHTML = '';
         }
     } catch (error) {
         console.error('Error al obtener el inventario:', error);
@@ -293,142 +305,93 @@ export async function displayInventory(node, isAdmin = false) {
 }
 
 function setupInventoryUI(node, items, isAdmin) {
-    const tableView = document.getElementById('table-view');
-    tableView.innerHTML = '';
-
-    const controls = document.createElement('div');
-    controls.className = 'inventory-controls';
-    controls.innerHTML = `
-        <button id="add-item-btn"><i class="fas fa-plus"></i> Agregar Item</button>
-        <button id="transfer-item-btn"><i class="fas fa-random"></i> Traspasar Item</button>
-        <button id="import-csv-btn"><i class="fas fa-file-import"></i> Importar CSV</button>
-        <input type="file" id="csv-file-input" accept=".csv" style="display: none;" />
-        <button id="export-csv-btn"><i class="fas fa-file-export"></i> Exportar CSV</button>
-        <button id="toggle-filters-btn"><i class="fas fa-filter"></i> Mostrar Filtros</button>
+    const controlsContainer = document.getElementById('global-controls-container');
+    if (!controlsContainer) return;
+    controlsContainer.innerHTML = `
+        <div class="inventory-controls">
+            <button id="add-item-btn"><i class="fas fa-plus"></i> Agregar Item</button>
+            <button id="transfer-item-btn"><i class="fas fa-random"></i> Traspasar Item</button>
+            <button id="import-csv-btn"><i class="fas fa-file-import"></i> Importar CSV</button>
+            <input type="file" id="csv-file-input" accept=".csv" style="display: none;" />
+            <button id="export-csv-btn"><i class="fas fa-file-export"></i> Exportar CSV</button>
+            <button id="toggle-filters-btn"><i class="fas fa-filter"></i> Mostrar Filtros</button>
+        </div>
+        <div class="filter-controls-container">
+            <div class="filter-row">
+                <label for="filter-id">Buscar por ID:</label>
+                <input type="text" id="filter-id" placeholder="ID del ítem">
+            </div>
+            <div class="filter-row">
+                <label for="filter-name">Buscar por Nombre:</label>
+                <input type="text" id="filter-name" placeholder="Nombre del ítem">
+            </div>
+            <div class="filter-row">
+                <label for="filter-category">Categoría:</label>
+                <select id="filter-category">
+                    <option value="">Todas</option>
+                    ${categories.map(cat => `<option value="${cat}">${cat}</option>`).join('')}
+                </select>
+            </div>
+            <div class="filter-row">
+                <label for="filter-status">Estado:</label>
+                <select id="filter-status">
+                    <option value="">Todos</option>
+                    ${statusOptions.map(option => `<option value="${option.value}">${option.label}</option>`).join('')}
+                </select>
+            </div>
+            <div class="filter-row">
+                <label for="filter-date-from">Adquirido Desde:</label>
+                <input type="date" id="filter-date-from">
+            </div>
+            <div class="filter-row">
+                <label for="filter-date-to">Adquirido Hasta:</label>
+                <input type="date" id="filter-date-to">
+            </div>
+            <div class="filter-actions">
+                <button id="apply-filters-btn" class="apply-filters-btn">
+                    <i class="fas fa-check"></i> Aplicar Filtros
+                </button>
+                <button id="reset-filters-btn" class="reset-filters-btn">
+                    <i class="fas fa-undo"></i> Limpiar Filtros
+                </button>
+            </div>
+        </div>
     `;
-    tableView.appendChild(controls);
 
-    document.getElementById("add-item-btn").addEventListener('click', () => showItemForm(node));
+    document.getElementById("add-item-btn").addEventListener('click', () => showItemForm(node, null));
     document.getElementById("transfer-item-btn").addEventListener('click', () => showTransferForm(node, items));
     document.getElementById("export-csv-btn").addEventListener('click', () => exportToCSV(node, items));
-
-    const importCsvBtn = document.getElementById('import-csv-btn');
-    const csvFileInput = document.getElementById('csv-file-input');
-    importCsvBtn.addEventListener('click', () => csvFileInput.click());
-    csvFileInput.addEventListener('change', (event) => {
-        const file = event.target.files[0];
-        if (!file) return;
-
-        const reader = new FileReader();
-        reader.onload = async (e) => {
-            const csvString = e.target.result;
-            const parsedItems = parseCSV(csvString);
-
-            if (parsedItems.length === 0) {
-                alert('El archivo CSV está vacío o tiene un formato incorrecto.');
-                event.target.value = null;
-                return;
-            }
-
-            const itemsToImport = parsedItems.map(item => ({ ...item, node_id: node.id }));
-
-            try {
-                const response = await fetch(`${API_URL}bulk_import.php`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(itemsToImport)
-                });
-                const result = await response.json();
-
-                if (result.success) {
-                    alert(result.message);
-                    addNotification('items_imported', result.message, sessionStorage.getItem('username'));
-                    displayInventory(node, isAdmin);
-                } else {
-                    alert(`Error en la importación: ${result.message}`);
-                }
-            } catch (error) {
-                console.error('Error de conexión al importar:', error);
-                alert('Error de conexión. No se pudo completar la importación.');
-            }
-        };
-        reader.readAsText(file, 'UTF-8');
-        event.target.value = null;
-    });
     
-    const filterControls = document.createElement('div');
-    filterControls.className = 'filter-controls-container';
-    filterControls.innerHTML = `
-        <div class="filter-row">
-            <label for="filter-id">Buscar por ID:</label>
-            <input type="text" id="filter-id" placeholder="ID del ítem">
-        </div>
-        <div class="filter-row">
-            <label for="filter-name">Buscar por Nombre:</label>
-            <input type="text" id="filter-name" placeholder="Nombre del ítem">
-        </div>
-        <div class="filter-row">
-            <label for="filter-category">Categoría:</label>
-            <select id="filter-category">
-                <option value="">Todas</option>
-                ${categories.map(cat => `<option value="${cat}">${cat}</option>`).join('')}
-            </select>
-        </div>
-        <div class="filter-row">
-            <label for="filter-status">Estado:</label>
-            <select id="filter-status">
-                <option value="">Todos</option>
-                ${statusOptions.map(option => `<option value="${option.value}">${option.label}</option>`).join('')}
-            </select>
-        </div>
-        <div class="filter-row">
-            <label for="filter-date-from">Adquirido Desde:</label>
-            <input type="date" id="filter-date-from">
-        </div>
-        <div class="filter-row">
-            <label for="filter-date-to">Adquirido Hasta:</label>
-            <input type="date" id="filter-date-to">
-        </div>
-        <div class="filter-actions">
-            <button id="apply-filters-btn" class="apply-filters-btn">
-                <i class="fas fa-check"></i> Aplicar Filtros
-            </button>
-            <button id="reset-filters-btn" class="reset-filters-btn">
-                <i class="fas fa-undo"></i> Limpiar Filtros
-            </button>
-        </div>
-    `;
-    tableView.appendChild(filterControls);
-
+    const filterControls = controlsContainer.querySelector('.filter-controls-container');
     document.getElementById('toggle-filters-btn').addEventListener('click', () => {
         filterControls.classList.toggle('visible');
-        const isVisible = filterControls.classList.contains('visible');
         const button = document.getElementById('toggle-filters-btn');
-        button.innerHTML = isVisible 
+        button.innerHTML = filterControls.classList.contains('visible') 
             ? '<i class="fas fa-eye-slash"></i> Ocultar Filtros' 
             : '<i class="fas fa-filter"></i> Mostrar Filtros';
     });
-
+    
     document.getElementById('apply-filters-btn').addEventListener('click', () => {
-        const filterId = document.getElementById('filter-id').value.trim();
-        const filterName = document.getElementById('filter-name').value.toLowerCase().trim();
-        const filterCategory = document.getElementById('filter-category').value;
-        const filterStatus = document.getElementById('filter-status').value;
-        const filterDateFrom = document.getElementById('filter-date-from').value;
-        const filterDateTo = document.getElementById('filter-date-to').value;
-
+        const filters = {
+            id: document.getElementById('filter-id').value.trim(),
+            name: document.getElementById('filter-name').value.toLowerCase().trim(),
+            category: document.getElementById('filter-category').value,
+            status: document.getElementById('filter-status').value,
+            dateFrom: document.getElementById('filter-date-from').value,
+            dateTo: document.getElementById('filter-date-to').value,
+        };
         const filteredItems = items.filter(item => {
             const itemDate = item.acquisitionDate ? new Date(item.acquisitionDate) : null;
-            const fromDate = filterDateFrom ? new Date(filterDateFrom) : null;
-            const toDate = filterDateTo ? new Date(filterDateTo) : null;
+            const fromDate = filters.dateFrom ? new Date(filters.dateFrom) : null;
+            const toDate = filters.dateTo ? new Date(filters.dateTo) : null;
             if(itemDate) itemDate.setUTCHours(0, 0, 0, 0);
             if(fromDate) fromDate.setUTCHours(0, 0, 0, 0);
             if(toDate) toDate.setUTCHours(0, 0, 0, 0);
             
-            return (!filterId || String(item.id).includes(filterId)) &&
-                   (!filterName || item.name.toLowerCase().includes(filterName)) &&
-                   (!filterCategory || item.category === filterCategory) &&
-                   (!filterStatus || item.status === filterStatus) &&
+            return (!filters.id || String(item.id).includes(filters.id)) &&
+                   (!filters.name || item.name.toLowerCase().includes(filters.name)) &&
+                   (!filters.category || item.category === filters.category) &&
+                   (!filters.status || item.status === filters.status) &&
                    (!fromDate || (itemDate && itemDate >= fromDate)) &&
                    (!toDate || (itemDate && itemDate <= toDate));
         });
@@ -439,27 +402,21 @@ function setupInventoryUI(node, items, isAdmin) {
         filterControls.querySelectorAll('input, select').forEach(el => el.value = '');
         renderTable(node, items, isAdmin);
     });
-
-    const tableContainer = document.createElement('div');
-    tableContainer.id = 'table-container';
-    tableView.appendChild(tableContainer);
-
-    renderTable(node, items, isAdmin);
 }
 
 function renderTable(node, items, isAdmin) {
-    const tableContainer = document.getElementById('table-container');
+    const tableContainer = document.getElementById('table-view');
     if (!tableContainer) return;
+    tableContainer.innerHTML = '';
 
     const isAllAreasView = isAdmin && node.id === '';
     
     if (items.length === 0) {
-        const isAnyFilterActive = document.querySelector('.filter-controls-container.visible');
-        tableContainer.innerHTML = isAnyFilterActive ? '<p>No se encontraron ítems que coincidan con los filtros seleccionados.</p>' : '<p>Este departamento aún no tiene ítems en su inventario.</p>';
+        tableContainer.innerHTML = '<p>No se encontraron ítems que coincidan con los filtros o el área está vacía.</p>';
         return;
     }
 
-    const tableHTML = `
+    tableContainer.innerHTML = `
         <div class="table-responsive">
             <table id="inventory-table" class="inventory-table">
                 <thead>
@@ -481,10 +438,7 @@ function renderTable(node, items, isAdmin) {
                             <td>${item.id}</td>
                             ${isAllAreasView ? `<td>${nodesMap.get(item.node_id) || 'N/A'}</td>` : ''}
                             <td>
-                                <img src="${item.imagePath || 'placeholder.png'}" 
-                                     alt="${item.name}" 
-                                     class="inventory-thumbnail"
-                                     style="width:50px; height:50px; object-fit:cover;">
+                                <img src="${item.imagePath || 'img/placeholder.png'}" alt="${item.name}" class="inventory-thumbnail" style="width:50px; height:50px; object-fit:cover;">
                             </td>
                             <td>${item.name}</td>
                             <td>${item.quantity}</td>
@@ -501,7 +455,6 @@ function renderTable(node, items, isAdmin) {
             </table>
         </div>
     `;
-    tableContainer.innerHTML = tableHTML;
 
     tableContainer.querySelectorAll('.edit-btn').forEach(button => {
         button.addEventListener('click', () => {
@@ -514,13 +467,13 @@ function renderTable(node, items, isAdmin) {
         button.addEventListener('click', async () => {
             const itemToDelete = items.find(i => i.id == button.dataset.itemId);
             if (confirm(`¿Está seguro de eliminar el ítem "${itemToDelete.name}"?`)) {
-                const formData = new FormData();
-                formData.append('id', itemToDelete.id);
                 try {
+                    const formData = new FormData();
+                    formData.append('id', itemToDelete.id);
                     const response = await fetch(API_URL + 'delete_item.php', { method: 'POST', body: formData });
                     const result = await response.json();
                     if (result.success) {
-                        addNotification('item_deleted', `Ítem "${itemToDelete.name}" eliminado del área "${node.name}".`, sessionStorage.getItem('username'));
+                        addNotification('item_deleted', `Ítem "${itemToDelete.name}" eliminado.`, sessionStorage.getItem('username'));
                         displayInventory(node, isAdmin);
                     } else {
                         alert(`Error: ${result.message}`);
@@ -538,16 +491,10 @@ function renderTable(node, items, isAdmin) {
             if (src.endsWith('placeholder.png')) return;
             const modalOverlay = document.createElement('div');
             modalOverlay.className = 'modal-overlay';
-            const modalImage = document.createElement('img');
-            modalImage.className = 'image-modal-content';
-            modalImage.src = src;
-            const closeModalBtn = document.createElement('span');
-            closeModalBtn.className = 'close-modal';
-            closeModalBtn.innerHTML = '&times;';
-            modalOverlay.append(modalImage, closeModalBtn);
+            modalOverlay.innerHTML = `<span class="close-modal">&times;</span><img src="${src}" class="image-modal-content">`;
             document.body.appendChild(modalOverlay);
             const close = () => modalOverlay.remove();
-            closeModalBtn.onclick = close;
+            modalOverlay.querySelector('.close-modal').onclick = close;
             modalOverlay.onclick = (e) => {
                 if (e.target === modalOverlay) close();
             };

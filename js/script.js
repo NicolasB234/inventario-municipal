@@ -1,5 +1,5 @@
 import { orgStructure } from './org-structure.js';
-import { displayInventory } from './inventory-functions.js';
+import { displayInventory, setupModalClosers } from './inventory-functions.js';
 
 const PHP_BASE_URL = 'php/';
 
@@ -88,10 +88,10 @@ const notificationCounterElement = document.getElementById('notification-counter
 function updateNotificationCounter() {
     const unreadCount = parseInt(localStorage.getItem('unreadNotifications') || '0');
     if (unreadCount > 0) {
-        notificationCounterElement.textContent = unreadCount;
-        notificationBellButton.classList.add('has-notifications');
+        if(notificationCounterElement) notificationCounterElement.textContent = unreadCount;
+        if (notificationBellButton) notificationBellButton.classList.add('has-notifications');
     } else {
-        notificationBellButton.classList.remove('has-notifications');
+        if (notificationBellButton) notificationBellButton.classList.remove('has-notifications');
     }
 }
 
@@ -113,10 +113,12 @@ export async function addNotification(type, message, username = 'Desconocido') {
     localStorage.setItem('unreadNotifications', unreadCount);
     updateNotificationCounter();
 
-    notificationBellButton.classList.add('new-notification');
-    setTimeout(() => {
-        notificationBellButton.classList.remove('new-notification');
-    }, 500);
+    if (notificationBellButton) {
+        notificationBellButton.classList.add('new-notification');
+        setTimeout(() => {
+            notificationBellButton.classList.remove('new-notification');
+        }, 500);
+    }
 
     try {
         const formData = new FormData();
@@ -276,6 +278,8 @@ if (isOnLoginPage) {
             window.location.href = 'login.html';
             return;
         }
+        
+        setupModalClosers();
 
         const themeSelector = document.getElementById('theme-selector');
         const applyTheme = (theme) => {
@@ -288,7 +292,9 @@ if (isOnLoginPage) {
                 themeSelector.value = theme;
             }
         };
-        themeSelector.addEventListener('change', () => applyTheme(themeSelector.value));
+        if (themeSelector) {
+            themeSelector.addEventListener('change', () => applyTheme(themeSelector.value));
+        }
         const savedTheme = localStorage.getItem('selectedTheme') || 'light';
         applyTheme(savedTheme);
         
@@ -366,7 +372,10 @@ if (isOnLoginPage) {
 
         function toggleNode(liElement) {
             liElement.classList.toggle('expanded');
-            liElement.querySelector('.toggle').textContent = liElement.classList.contains('expanded') ? '▾' : '▸';
+            const toggle = liElement.querySelector('.toggle');
+            if (toggle) {
+                toggle.textContent = liElement.classList.contains('expanded') ? '▾' : '▸';
+            }
         }
 
         function expandParents(nodePath) {
@@ -378,6 +387,17 @@ if (isOnLoginPage) {
                 }
             });
         }
+
+        const sidebarToggleBtn = document.getElementById('sidebar-toggle-btn');
+        const sidebarOverlay = document.getElementById('sidebar-overlay');
+        const body = document.body;
+
+        const openSidebar = () => body.classList.add('sidebar-open');
+        const closeSidebar = () => body.classList.remove('sidebar-open');
+        
+        if (sidebarToggleBtn) sidebarToggleBtn.addEventListener('click', openSidebar);
+        if (sidebarOverlay) sidebarOverlay.addEventListener('click', closeSidebar);
+
 
         function selectNode(liElement, node) {
             if (selectedNodeElement) {
@@ -395,6 +415,7 @@ if (isOnLoginPage) {
                 }
             }
             
+            closeSidebar();
             switchView('table-view');
             displayInventory(node, isAdmin);
         }
@@ -402,16 +423,25 @@ if (isOnLoginPage) {
         function setupHeaderButtons() {
             const container = document.getElementById('header-right-container');
             if (!container) return;
-            container.innerHTML = '';
+            
+            container.querySelectorAll('#history-btn, #logout-btn').forEach(btn => btn.remove());
+            
             const historyButton = document.createElement('button');
             historyButton.id = 'history-btn';
-            historyButton.innerHTML = '<i class="fas fa-history"></i> Historial';
+            historyButton.innerHTML = '<i class="fas fa-history"></i>';
+            historyButton.title = "Historial";
+            historyButton.className = "header-btn";
             historyButton.onclick = () => { window.location.href = 'notificaciones.html'; };
+            
             const logoutButton = document.createElement('button');
             logoutButton.id = 'logout-btn';
-            logoutButton.innerHTML = '<i class="fas fa-sign-out-alt"></i> Cerrar Sesión';
+            logoutButton.innerHTML = '<i class="fas fa-sign-out-alt"></i>';
+            logoutButton.title = "Cerrar Sesión";
+            logoutButton.className = "header-btn";
             logoutButton.addEventListener('click', () => { window.location.href = `${PHP_BASE_URL}logout.php`; });
-            container.append(historyButton, logoutButton);
+            
+            container.prepend(logoutButton);
+            container.prepend(historyButton);
         }
         
         function init() {
@@ -423,9 +453,7 @@ if (isOnLoginPage) {
                 allAreasButton.id = 'all-areas-btn';
                 allAreasButton.className = 'node-content';
                 allAreasButton.innerHTML = `<i class="fas fa-globe" style="margin-right: 10px;"></i> Todas las Áreas`;
-                allAreasButton.onclick = () => {
-                    selectNode(null, { id: '', name: 'Todas las Áreas' });
-                };
+                allAreasButton.onclick = () => selectNode(null, { id: '', name: 'Todas las Áreas' });
                 orgNav.appendChild(allAreasButton);
 
                 buildOrgTree(orgStructure, orgNav);
@@ -447,6 +475,7 @@ if (isOnLoginPage) {
                         const nodeElement = orgNav.querySelector(`li[data-node-id="${initialNodeData.node.id}"]`);
                         if (nodeElement) {
                            selectNode(nodeElement, initialNodeData.node);
+                           expandParents(initialNodeData.path);
                         }
                     }
                 }
@@ -455,35 +484,16 @@ if (isOnLoginPage) {
         }
 
         init();
-    });
 
-
-// ... (Todo el código anterior sin cambios) ...
-
-} else if (window.location.pathname.endsWith('index.html')) {
-    document.addEventListener('DOMContentLoaded', async () => {
-        // ... (Toda la inicialización existente de login, temas, notificaciones, vistas, etc.) ...
-        
-        function init() {
-            // ... (Toda la función init sin cambios) ...
-        }
-
-        init();
-
-        // --- LÓGICA DEL CHATBOT ---
         const chatbotContainer = document.getElementById('chatbot-container');
         const chatbotToggleBtn = document.getElementById('chatbot-toggle-btn');
         const closeChatbotBtn = document.getElementById('close-chatbot-btn');
 
         const toggleChatbot = () => {
-            chatbotContainer.classList.toggle('active');
+            if(chatbotContainer) chatbotContainer.classList.toggle('active');
         };
 
-        if (chatbotToggleBtn) {
-            chatbotToggleBtn.addEventListener('click', toggleChatbot);
-        }
-        if (closeChatbotBtn) {
-            closeChatbotBtn.addEventListener('click', toggleChatbot);
-        }
+        if (chatbotToggleBtn) chatbotToggleBtn.addEventListener('click', toggleChatbot);
+        if (closeChatbotBtn) closeChatbotBtn.addEventListener('click', toggleChatbot);
     });
 }

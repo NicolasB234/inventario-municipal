@@ -16,7 +16,6 @@ const statusOptions = [
     { value: 'B', label: 'De Baja' }
 ];
 
-// Se mantiene la estructura original anidada para estas funciones
 function getShortNameNodesMap() {
     const map = new Map();
     function traverse(nodes) {
@@ -74,25 +73,27 @@ export function showItemForm(node, item = null) {
 
     const imagePreview = document.getElementById('imagePreview');
     const imageInput = document.getElementById('form-itemImage');
-    imageInput.onchange = () => {
-        if (imageInput.files && imageInput.files[0]) {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                imagePreview.src = e.target.result;
-                imagePreview.style.display = 'block';
-            };
-            reader.readAsDataURL(imageInput.files[0]);
+    if(imageInput && imagePreview){
+        imageInput.onchange = () => {
+            if (imageInput.files && imageInput.files[0]) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    imagePreview.src = e.target.result;
+                    imagePreview.style.display = 'block';
+                };
+                reader.readAsDataURL(imageInput.files[0]);
+            }
+        };
+
+        if (isEditing && item.imagePath) {
+            imagePreview.src = item.imagePath;
+            imagePreview.style.display = 'block';
+        } else {
+            imagePreview.style.display = 'none';
+            imagePreview.src = '#';
         }
-    };
-
-    if (isEditing && item.imagePath) {
-        imagePreview.src = item.imagePath;
-        imagePreview.style.display = 'block';
-    } else {
-        imagePreview.style.display = 'none';
-        imagePreview.src = '#';
     }
-
+    
     if (currentFormSubmitHandler) {
         form.removeEventListener('submit', currentFormSubmitHandler);
     }
@@ -101,18 +102,21 @@ export function showItemForm(node, item = null) {
         event.preventDefault();
         const formData = new FormData(form);
         const endpoint = isEditing ? 'update_item.php' : 'add_item.php';
+        const isAdmin = sessionStorage.getItem('isAdmin') === 'true';
         
         try {
             const response = await fetch(API_URL + endpoint, { method: 'POST', body: formData });
             const result = await response.json();
+            
+            alert(result.message);
+
             if (result.success) {
-                const action = isEditing ? 'item_edited' : 'item_added';
-                const message = isEditing ? `Ítem "${formData.get('name')}" editado.` : `Nuevo ítem "${formData.get('name')}" añadido.`;
-                addNotification(action, message, sessionStorage.getItem('username'));
+                addNotification(result.message);
+                
                 closeItemForm();
-                displayInventory(node, sessionStorage.getItem('isAdmin') === 'true');
-            } else {
-                alert(`Error: ${result.message}`);
+                if (isAdmin || !isEditing) {
+                    displayInventory(node, isAdmin);
+                }
             }
         } catch (error) {
             console.error('Error al guardar:', error);
@@ -192,22 +196,22 @@ function showTransferForm(node, items) {
     document.getElementById('transfer-form').addEventListener('submit', async (e) => {
         e.preventDefault();
         const formData = new FormData(e.target);
-        const itemName = e.target.querySelector('#item-to-transfer option:checked').text;
-        const destinationName = e.target.querySelector('#destination-area option:checked').text;
-        if (!confirm(`¿Está seguro de traspasar el ítem "${itemName}" al área "${destinationName}"?`)) return;
+        if (!confirm(`¿Está seguro de que desea solicitar el traspaso de este ítem?`)) return;
+
+        const isAdmin = sessionStorage.getItem('isAdmin') === 'true';
 
         try {
             const response = await fetch(`${API_URL}transfer_item.php`, { method: 'POST', body: formData });
             const result = await response.json();
+            
+            alert(result.message);
+
             if (result.success) {
-                const reason = formData.get('reason');
-                const notifMessage = `Ítem "${itemName}" traspasado de "${node.name}" a "${destinationName}". Motivo: ${reason}`;
-                addNotification('item_transferred', notifMessage, sessionStorage.getItem('username'));
-                alert('Traspaso realizado con éxito.');
+                addNotification(result.message);
                 closeModal();
-                displayInventory(node, sessionStorage.getItem('isAdmin') === 'true');
-            } else {
-                alert(`Error en el traspaso: ${result.message}`);
+                if (isAdmin) {
+                    displayInventory(node, isAdmin);
+                }
             }
         } catch (error) {
             console.error('Error de conexión:', error);
@@ -240,11 +244,14 @@ function exportToXLSX(node, items) {
 }
 
 export async function displayInventory(node, isAdmin = false) {
-    const contentTitle = document.getElementById('content-title');
     const tableView = document.getElementById('table-view');
+    const galleryView = document.getElementById('gallery-view');
     
-    contentTitle.textContent = `Inventario de: ${node.name}`;
     tableView.innerHTML = '<p>Cargando inventario...</p>';
+    if (galleryView) {
+        const galleryContainer = galleryView.querySelector('#gallery-container');
+        if (galleryContainer) galleryContainer.innerHTML = '<p>Cargando galería...</p>';
+    }
 
     try {
         const response = await fetch(`${API_URL}get_inventory.php?node_id=${node.id}`);
@@ -253,13 +260,18 @@ export async function displayInventory(node, isAdmin = false) {
         if (result.success) {
             setupInventoryUI(node, result.data, isAdmin);
             renderTable(node, result.data, isAdmin);
+            if (galleryView) renderGallery(result.data, isAdmin); 
         } else {
-            tableView.innerHTML = `<p>Error al cargar el inventario: ${result.message}</p>`;
+            const errorMessage = `<p>Error al cargar el inventario: ${result.message}</p>`;
+            tableView.innerHTML = errorMessage;
+            if (galleryView) galleryView.querySelector('#gallery-container').innerHTML = errorMessage;
             document.getElementById('global-controls-container').innerHTML = '';
         }
     } catch (error) {
         console.error('Error al obtener el inventario:', error);
-        tableView.innerHTML = '<p>Error de conexión al cargar el inventario.</p>';
+        const connErrorMessage = '<p>Error de conexión al cargar el inventario.</p>';
+        tableView.innerHTML = connErrorMessage;
+        if (galleryView) galleryView.querySelector('#gallery-container').innerHTML = connErrorMessage;
     }
 }
 
@@ -267,7 +279,6 @@ function setupInventoryUI(node, items, isAdmin) {
     const controlsContainer = document.getElementById('global-controls-container');
     if (!controlsContainer) return;
 
-    // **LÓGICA DE FILTROS RESTAURADA**
     controlsContainer.innerHTML = `
         <div class="inventory-controls">
             <button id="add-item-btn"><i class="fas fa-plus"></i> Agregar Item</button>
@@ -275,6 +286,7 @@ function setupInventoryUI(node, items, isAdmin) {
             <button id="import-xlsx-btn"><i class="fas fa-file-import"></i> Importar XLSX</button>
             <input type="file" id="xlsx-file-input" accept=".xlsx, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel" style="display: none;" />
             <button id="export-xlsx-btn"><i class="fas fa-file-export"></i> Exportar XLSX</button>
+            <button id="export-docx-btn"><i class="fas fa-file-word"></i> Exportar DOCX</button>
             <button id="toggle-filters-btn"><i class="fas fa-filter"></i> Mostrar Filtros</button>
         </div>
         <div class="filter-controls-container">
@@ -295,7 +307,6 @@ function setupInventoryUI(node, items, isAdmin) {
     document.getElementById("transfer-item-btn").addEventListener('click', () => showTransferForm(node, items));
     document.getElementById("export-xlsx-btn").addEventListener('click', () => exportToXLSX(node, items));
     
-    // **EVENT LISTENERS DE FILTROS RESTAURADOS**
     const filterControls = controlsContainer.querySelector('.filter-controls-container');
     document.getElementById('toggle-filters-btn').addEventListener('click', () => {
         filterControls.classList.toggle('visible');
@@ -330,14 +341,16 @@ function setupInventoryUI(node, items, isAdmin) {
                    (!toDate || (itemDate && itemDate <= toDate));
         });
         renderTable(node, filteredItems, isAdmin);
+        renderGallery(filteredItems, isAdmin);
     });
 
     document.getElementById('reset-filters-btn').addEventListener('click', () => {
         filterControls.querySelectorAll('input, select').forEach(el => el.value = '');
         renderTable(node, items, isAdmin);
+        renderGallery(items, isAdmin);
     });
 
-    // **LÓGICA DE IMPORTACIÓN**
+    // --- INICIO DE LA CORRECCIÓN ---
     const importBtn = document.getElementById('import-xlsx-btn');
     const fileInput = document.getElementById('xlsx-file-input');
     importBtn.addEventListener('click', () => fileInput.click());
@@ -361,7 +374,7 @@ function setupInventoryUI(node, items, isAdmin) {
                 const mappedJson = json.filter(row => Object.keys(row).length > 0).map(row => {
                     const newRow = {};
                     for (const key in row) {
-                        const lowerKey = key.toLowerCase().trim();
+                        const lowerKey = key.toLowerCase().trim().replace(/\s+/g, '');
                         if (lowerKey.startsWith('nombre')) newRow.nombre = row[key];
                         else if (lowerKey.startsWith('cantidad')) newRow.cantidad = row[key];
                         else if (lowerKey.startsWith('categor')) newRow.categoria = row[key];
@@ -393,12 +406,14 @@ function setupInventoryUI(node, items, isAdmin) {
                 }
 
                 const result = await response.json();
+                
+                alert(result.message);
+
                 if (result.success) {
-                    addNotification('items_imported', result.message, sessionStorage.getItem('username'));
-                    alert(result.message);
-                    displayInventory(node, isAdmin);
-                } else {
-                    alert(`Error en la importación: ${result.message}`);
+                    addNotification(result.message);
+                    if (isAdmin) {
+                        displayInventory(node, isAdmin);
+                    }
                 }
             } catch (error) {
                 console.error('Error durante la importación:', error);
@@ -408,6 +423,7 @@ function setupInventoryUI(node, items, isAdmin) {
         reader.readAsArrayBuffer(file);
         fileInput.value = '';
     });
+    // --- FIN DE LA CORRECCIÓN ---
 }
 
 function renderTable(node, items, isAdmin) {
@@ -428,15 +444,24 @@ function renderTable(node, items, isAdmin) {
                 <thead><tr>
                     <th>ID</th>
                     ${isAllAreasView ? '<th>Área</th>' : ''}
-                    <th>Imagen</th><th>Nombre</th><th>Cantidad</th><th>Categoría</th><th>Descripción</th><th>Estado</th><th>Acciones</th>
+                    <th>Nombre</th>
+                    <th>Cantidad</th>
+                    <th>Categoría</th>
+                    <th>Descripción</th>
+                    <th>Fecha de Adquisición</th>
+                    <th>Estado</th>
+                    <th>Acciones</th>
                 </tr></thead>
                 <tbody>
                     ${items.map(item => `
                         <tr>
                             <td>${item.id}</td>
                             ${isAllAreasView ? `<td>${nodesMap.get(item.node_id) || 'N/A'}</td>` : ''}
-                            <td><img src="${item.imagePath || 'img/placeholder.png'}" alt="${item.name}" class="inventory-thumbnail" style="width:50px; height:50px; object-fit:cover;"></td>
-                            <td>${item.name}</td><td>${item.quantity}</td><td>${item.category}</td><td>${item.description || ''}</td>
+                            <td>${item.name}</td>
+                            <td>${item.quantity}</td>
+                            <td>${item.category}</td>
+                            <td>${item.description || ''}</td>
+                            <td>${item.acquisitionDate || 'No especificada'}</td>
                             <td>${statusOptions.find(s => s.value === item.status)?.label || 'Desconocido'}</td>
                             <td class="actions">
                                 <button class="edit-btn" data-item-id="${item.id}"><i class="fas fa-edit"></i></button>
@@ -459,17 +484,20 @@ function renderTable(node, items, isAdmin) {
     tableContainer.querySelectorAll('.delete-btn').forEach(button => {
         button.addEventListener('click', async () => {
             const itemToDelete = items.find(i => i.id == button.dataset.itemId);
-            if (confirm(`¿Está seguro de eliminar el ítem "${itemToDelete.name}"?`)) {
+            if (confirm(`¿Está seguro de que desea solicitar la eliminación del ítem "${itemToDelete.name}"?`)) {
                 try {
                     const formData = new FormData();
                     formData.append('id', itemToDelete.id);
                     const response = await fetch(API_URL + 'delete_item.php', { method: 'POST', body: formData });
                     const result = await response.json();
+                    
+                    alert(result.message);
+
                     if (result.success) {
-                        addNotification('item_deleted', `Ítem "${itemToDelete.name}" eliminado.`, sessionStorage.getItem('username'));
-                        displayInventory(node, isAdmin);
-                    } else {
-                        alert(`Error: ${result.message}`);
+                        addNotification(result.message);
+                        if (isAdmin) {
+                            displayInventory(node, isAdmin);
+                        }
                     }
                 } catch (error) {
                     alert('Error de conexión al eliminar.');
@@ -477,18 +505,34 @@ function renderTable(node, items, isAdmin) {
             }
         });
     });
+}
 
-    tableContainer.querySelectorAll('.inventory-thumbnail').forEach(thumbnail => {
-        thumbnail.addEventListener('click', (event) => {
-            const src = event.target.src;
-            if (src.endsWith('placeholder.png')) return;
-            const modalOverlay = document.createElement('div');
-            modalOverlay.className = 'modal-overlay';
-            modalOverlay.innerHTML = `<span class="close-modal">&times;</span><img src="${src}" class="image-modal-content">`;
-            document.body.appendChild(modalOverlay);
-            const close = () => modalOverlay.remove();
-            modalOverlay.querySelector('.close-modal').onclick = close;
-            modalOverlay.onclick = (e) => { if (e.target === modalOverlay) close(); };
-        });
+function renderGallery(items, isAdmin) {
+    const galleryContainer = document.getElementById('gallery-container');
+    if (!galleryContainer) return;
+    galleryContainer.innerHTML = '';
+
+    if (items.length === 0) {
+        galleryContainer.innerHTML = '<p>No hay ítems para mostrar en esta área.</p>';
+        return;
+    }
+    
+    const itemsWithImages = items.filter(item => item.imagePath);
+
+    if (itemsWithImages.length === 0) {
+        galleryContainer.innerHTML = '<p>Ningún ítem en esta vista tiene una imagen asociada.</p>';
+        return;
+    }
+
+    itemsWithImages.forEach(item => {
+        const card = document.createElement('div');
+        card.className = 'gallery-card';
+        card.innerHTML = `
+            <div class="gallery-card-img-container">
+                <img src="${item.imagePath}" alt="${item.name}" class="gallery-card-img">
+            </div>
+            <div class="gallery-card-title">${item.name}</div>
+        `;
+        galleryContainer.appendChild(card);
     });
 }

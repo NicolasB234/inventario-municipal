@@ -1,16 +1,17 @@
 <?php
 // register.php
-header('Content-Type: application/json'); // Indicamos que la respuesta será JSON
-require_once 'db_connect.php'; // Incluimos el archivo de conexión a la base de datos
+header('Content-Type: application/json');
+require_once 'db_connect.php';
 
 $response = ['success' => false, 'message' => ''];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $username = trim($_POST['username'] ?? '');
-    $password = trim($_POST['password'] ?? '');
-    $areaId = trim($_POST['area_id'] ?? ''); // Get area_id
+    // CORRECCIÓN: Se reemplaza '??' por una sintaxis más compatible.
+    $username = trim(isset($_POST['username']) ? $_POST['username'] : '');
+    $password = trim(isset($_POST['password']) ? $_POST['password'] : '');
+    $areaId = trim(isset($_POST['area_id']) ? $_POST['area_id'] : '');
 
-    if (empty($username) || empty($password) || empty($areaId)) { // Validate areaId
+    if (empty($username) || empty($password) || empty($areaId)) {
         $response['message'] = 'Por favor, rellene todos los campos.';
         echo json_encode($response);
         exit();
@@ -31,7 +32,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // Insertar nuevo usuario incluyendo area_id
         $stmt->close();
         $stmt = $conn->prepare("INSERT INTO users (username, password_hash, area_id) VALUES (?, ?, ?)");
-        $stmt->bind_param("sss", $username, $password_hash, $areaId); // 'sss' for three strings
+        $stmt->bind_param("sss", $username, $password_hash, $areaId);
 
         if ($stmt->execute()) {
             $response['success'] = true;

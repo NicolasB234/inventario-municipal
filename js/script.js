@@ -3,6 +3,115 @@ import { displayInventory, setupModalClosers } from './inventory-functions.js';
 
 const PHP_BASE_URL = 'php/';
 
+// Esta función ahora SOLO se encarga de la parte visual de la campanita.
+export function addNotification(message) {
+    // Almacenamos el mensaje en una lista temporal solo para mostrarlo en el panel.
+    const localNotifications = JSON.parse(localStorage.getItem('appNotifications')) || [];
+    const newNotification = {
+        id: Date.now(),
+        message: message,
+        timestamp: new Date().toISOString(),
+    };
+    localNotifications.unshift(newNotification);
+    if (localNotifications.length > 20) {
+        localNotifications.length = 20;
+    }
+    localStorage.setItem('appNotifications', JSON.stringify(localNotifications));
+
+    // Aumentamos el contador de "no leídas" para el efecto visual.
+    let unreadCount = parseInt(localStorage.getItem('unreadNotifications') || '0');
+    unreadCount++;
+    localStorage.setItem('unreadNotifications', unreadCount);
+    
+    updateNotificationCounter();
+
+    const notificationBellButton = document.getElementById('notification-bell-btn');
+    if (notificationBellButton) {
+        notificationBellButton.classList.add('new-notification');
+        setTimeout(() => {
+            notificationBellButton.classList.remove('new-notification');
+        }, 500);
+    }
+}
+
+function updateNotificationCounter() {
+    const notificationBellButton = document.getElementById('notification-bell-btn');
+    const notificationCounterElement = document.getElementById('notification-counter');
+    const unreadCount = parseInt(localStorage.getItem('unreadNotifications') || '0');
+
+    if (!notificationBellButton || !notificationCounterElement) {
+        return;
+    }
+
+    if (unreadCount > 0) {
+        notificationCounterElement.textContent = unreadCount;
+        notificationCounterElement.style.display = 'block';
+        notificationBellButton.classList.add('has-notifications');
+    } else {
+        notificationCounterElement.style.display = 'none';
+        notificationBellButton.classList.remove('has-notifications');
+    }
+}
+
+// --- INICIO DE LA CORRECCIÓN ---
+let lastNotificationId = 0; 
+let lastAdminRequestCount = 0;
+
+async function fetchUpdates() {
+    try {
+        const response = await fetch(`${PHP_BASE_URL}get_updates.php?last_id=${lastNotificationId}`);
+        const data = await response.json();
+        const isAdmin = sessionStorage.getItem('isAdmin') === 'true';
+
+        // 1. Si el servidor nos envía notificaciones nuevas.
+        if (data.new_notifications && data.new_notifications.length > 0) {
+            data.new_notifications.forEach(notif => {
+                addNotification(notif.details); // Añadimos la notificación a la campanita.
+                lastNotificationId = Math.max(lastNotificationId, notif.id);
+            });
+        }
+
+        // 2. Si el servidor nos dice que refresquemos la vista del inventario.
+        if (data.refresh_inventory) {
+            const selectedNodeElement = document.querySelector('#org-nav .node-content.selected');
+            if (selectedNodeElement) {
+                const nodeId = selectedNodeElement.parentElement.dataset.nodeId;
+                const nodeName = selectedNodeElement.textContent.trim();
+                setTimeout(() => {
+                    displayInventory({ id: nodeId, name: nodeName }, isAdmin);
+                }, 500);
+            }
+        }
+        
+        // 3. Si somos admin, actualizamos el número de la campanita con las solicitudes pendientes.
+        if (isAdmin) {
+             const notificationCounterElement = document.getElementById('notification-counter');
+             if (notificationCounterElement) {
+                if (data.pending_admin_requests > lastAdminRequestCount) {
+                    addNotification("Ha recibido una nueva solicitud pendiente de revisión.");
+                }
+                lastAdminRequestCount = data.pending_admin_requests;
+
+                if (lastAdminRequestCount > 0) {
+                    notificationCounterElement.textContent = lastAdminRequestCount;
+                    notificationCounterElement.style.display = 'block';
+                } else {
+                    notificationCounterElement.style.display = 'none';
+                }
+             }
+        }
+
+    } catch (error) {
+        console.error('Error en el polling de actualizaciones:', error);
+    }
+}
+
+function startUpdatePolling() {
+    fetchUpdates(); // Verificamos al cargar la página.
+    setInterval(fetchUpdates, 15000); // Y luego cada 15 segundos.
+}
+// --- FIN DE LA CORRECCIÓN ---
+
 async function handleLogin(username, password) {
     const formData = new FormData();
     formData.append('username', username);
@@ -48,7 +157,7 @@ function getAllInventoryNodes(structure) {
             if (['departamento', 'coordinacion', 'area', 'direction'].includes(item.type)) {
                 nodes.push({ id: item.id, name: currentPath.join(' > ') });
             }
-            if (item.children && item.children.length > 0) {
+            if (item.children) {
                 traverse(item.children, currentPath);
             }
         });
@@ -57,8 +166,18 @@ function getAllInventoryNodes(structure) {
     return nodes;
 }
 
+function getAreaNameById(structure, id) {
+    for (const node of structure) {
+        if (node.id === id) return node.name;
+        if (node.children) {
+            const found = getAreaNameById(node.children, id);
+            if (found) return found;
+        }
+    }
+    return null;
+}
+
 function findNodeWithParents(id, structure, path = []) {
-    if (!id) return null;
     for (const node of structure) {
         if (node.id === id) return { node, path: [...path, node.id] };
         if (node.children) {
@@ -74,66 +193,14 @@ function filterOrgStructureForUser(nodes, targetId) {
         if (node.id === targetId) return node;
         if (node.children) {
             const filteredChildren = filterOrgStructureForUser(node.children, targetId);
-            if (filteredChildren.length > 0) {
-                return { ...node, children: filteredChildren };
-            }
+            if (filteredChildren.length > 0) return { ...node, children: filteredChildren };
         }
         return null;
-    }).filter(node => node !== null);
-}
-
-const notificationBellButton = document.getElementById('notification-bell-btn');
-const notificationCounterElement = document.getElementById('notification-counter');
-
-function updateNotificationCounter() {
-    const unreadCount = parseInt(localStorage.getItem('unreadNotifications') || '0');
-    if (unreadCount > 0) {
-        if(notificationCounterElement) notificationCounterElement.textContent = unreadCount;
-        if (notificationBellButton) notificationBellButton.classList.add('has-notifications');
-    } else {
-        if (notificationBellButton) notificationBellButton.classList.remove('has-notifications');
-    }
-}
-
-export async function addNotification(type, message, username = 'Desconocido') {
-    const localNotifications = JSON.parse(localStorage.getItem('appNotifications')) || [];
-    const newNotification = {
-        id: Date.now(),
-        message: `${message}${username ? ` por ${username}` : ''}`,
-        timestamp: new Date().toISOString(),
-    };
-    localNotifications.unshift(newNotification);
-    if (localNotifications.length > 20) {
-        localNotifications.length = 20;
-    }
-    localStorage.setItem('appNotifications', JSON.stringify(localNotifications));
-
-    let unreadCount = parseInt(localStorage.getItem('unreadNotifications') || '0');
-    unreadCount++;
-    localStorage.setItem('unreadNotifications', unreadCount);
-    updateNotificationCounter();
-
-    if (notificationBellButton) {
-        notificationBellButton.classList.add('new-notification');
-        setTimeout(() => {
-            notificationBellButton.classList.remove('new-notification');
-        }, 500);
-    }
-
-    try {
-        const formData = new FormData();
-        formData.append('type', type);
-        formData.append('message', message);
-        fetch(`${PHP_BASE_URL}log_activity.php`, {
-            method: 'POST',
-            body: formData
-        });
-    } catch (error) {
-        console.error('Error al registrar la actividad en la base de datos:', error);
-    }
+    }).filter(Boolean);
 }
 
 function toggleNotifPanel() {
+    const notificationBellButton = document.getElementById('notification-bell-btn');
     const existingPanel = document.querySelector('.notifications-panel');
     if (existingPanel) {
         existingPanel.remove();
@@ -143,7 +210,7 @@ function toggleNotifPanel() {
     const notifPanel = document.createElement('div');
     notifPanel.className = 'notifications-panel';
     const localNotifications = JSON.parse(localStorage.getItem('appNotifications')) || [];
-    let notificationsHtml = '<h3>Actividad Reciente</h3>';
+    let notificationsHtml = '<h3>Actividad Reciente</h3><div class="notifications-list">';
     if (localNotifications.length === 0) {
         notificationsHtml += '<p>No hay notificaciones recientes.</p>';
     } else {
@@ -152,6 +219,7 @@ function toggleNotifPanel() {
             notificationsHtml += `<p><strong>[${date}]</strong> ${notif.message}</p>`;
         });
     }
+    notificationsHtml += '</div><a href="notificaciones.html" class="view-all-notifs">Ver todo el historial</a>';
     notifPanel.innerHTML = notificationsHtml;
     document.body.appendChild(notifPanel);
 
@@ -169,15 +237,13 @@ function toggleNotifPanel() {
     }, 0);
 }
 
-const isOnLoginPage = window.location.pathname.endsWith('login.html') || window.location.pathname.endsWith('/') || !window.location.pathname.split('/').pop().includes('.');
 
-if (isOnLoginPage) {
-    document.addEventListener('DOMContentLoaded', async () => {
+// --- LÓGICA PRINCIPAL AL CARGAR LA PÁGINA ---
+document.addEventListener('DOMContentLoaded', async () => {
+
+    if (document.getElementById('login-section')) {
         const loginStatus = await checkLoginStatusFromServer();
         if (loginStatus.loggedIn) {
-            sessionStorage.setItem('userAreaId', loginStatus.areaId);
-            sessionStorage.setItem('username', loginStatus.username);
-            sessionStorage.setItem('isAdmin', loginStatus.isAdmin || false);
             window.location.href = 'index.html';
             return;
         }
@@ -227,9 +293,7 @@ if (isOnLoginPage) {
                 searchResults.style.display = 'none';
                 return;
             }
-            const filteredAreas = allAreas.filter(area => 
-                area.name.toLowerCase().includes(query)
-            );
+            const filteredAreas = allAreas.filter(area => area.name.toLowerCase().includes(query));
             if (filteredAreas.length > 0) {
                 filteredAreas.forEach(area => {
                     const item = document.createElement('div');
@@ -266,13 +330,14 @@ if (isOnLoginPage) {
             registerMessage.textContent = result.message;
             registerMessage.style.color = result.success ? '#2ecc71' : '#e74c3c';
             if (result.success) {
-                setTimeout(() => window.location.reload(), 2000);
+                setTimeout(() => {
+                    loginForm.classList.add('active');
+                    registerForm.classList.remove('active');
+                }, 2000);
             }
         });
-    });
 
-} else if (window.location.pathname.endsWith('index.html')) {
-    document.addEventListener('DOMContentLoaded', async () => {
+    } else if (document.getElementById('inventory-section')) {
         const loginStatus = await checkLoginStatusFromServer();
         if (!loginStatus.loggedIn) {
             window.location.href = 'login.html';
@@ -280,48 +345,24 @@ if (isOnLoginPage) {
         }
         
         setupModalClosers();
-
-        const themeSelector = document.getElementById('theme-selector');
-        const applyTheme = (theme) => {
-            document.body.classList.remove('dark-mode', 'night-mode');
-            if (theme !== 'light') {
-                document.body.classList.add(theme);
-            }
-            localStorage.setItem('selectedTheme', theme);
-            if (themeSelector) {
-                themeSelector.value = theme;
-            }
-        };
-        if (themeSelector) {
-            themeSelector.addEventListener('change', () => applyTheme(themeSelector.value));
-        }
-        const savedTheme = localStorage.getItem('selectedTheme') || 'light';
-        applyTheme(savedTheme);
         
+        const notificationBellButton = document.getElementById('notification-bell-btn');
         if (notificationBellButton) {
             notificationBellButton.addEventListener('click', toggleNotifPanel);
         }
-        updateNotificationCounter();
-
+        
+        startUpdatePolling(); // Iniciamos el polling aquí.
+        
         const viewButtons = document.querySelectorAll('.view-btn');
         const viewSections = document.querySelectorAll('.view-section');
 
         function switchView(viewId) {
-            viewSections.forEach(section => {
-                section.classList.remove('active');
-            });
-            viewButtons.forEach(button => {
-                button.classList.remove('active');
-            });
-
+            viewSections.forEach(section => section.classList.remove('active'));
+            viewButtons.forEach(button => button.classList.remove('active'));
             const activeSection = document.getElementById(viewId);
-            if (activeSection) {
-                activeSection.classList.add('active');
-            }
+            if (activeSection) activeSection.classList.add('active');
             const activeButton = document.getElementById(`show-${viewId}-btn`);
-            if (activeButton) {
-                activeButton.classList.add('active');
-            }
+            if (activeButton) activeButton.classList.add('active');
         }
 
         viewButtons.forEach(button => {
@@ -356,13 +397,9 @@ if (isOnLoginPage) {
                 const nodeNameSpan = document.createElement('span');
                 nodeNameSpan.textContent = node.name;
                 nodeContent.append(toggle, nodeNameSpan);
-                if (isAdmin || node.id === userAreaId) {
-                    nodeContent.onclick = () => selectNode(li, node);
-                } else {
-                    nodeContent.style.cursor = 'default';
-                }
+                nodeContent.onclick = () => selectNode(li, node);
                 li.appendChild(nodeContent);
-                if (node.children && node.children.length > 0) {
+                if (node.children) {
                     buildOrgTree(node.children, li);
                 }
                 ul.appendChild(li);
@@ -398,7 +435,6 @@ if (isOnLoginPage) {
         if (sidebarToggleBtn) sidebarToggleBtn.addEventListener('click', openSidebar);
         if (sidebarOverlay) sidebarOverlay.addEventListener('click', closeSidebar);
 
-
         function selectNode(liElement, node) {
             if (selectedNodeElement) {
                 selectedNodeElement.classList.remove('selected');
@@ -416,15 +452,15 @@ if (isOnLoginPage) {
             }
             
             closeSidebar();
-            switchView('table-view');
             displayInventory(node, isAdmin);
         }
         
         function setupHeaderButtons() {
             const container = document.getElementById('header-right-container');
             if (!container) return;
-            
-            container.querySelectorAll('#history-btn, #logout-btn').forEach(btn => btn.remove());
+
+            const dynamicButtons = container.querySelectorAll('.header-btn, #requests-btn');
+            dynamicButtons.forEach(btn => btn.remove());
             
             const historyButton = document.createElement('button');
             historyButton.id = 'history-btn';
@@ -442,13 +478,36 @@ if (isOnLoginPage) {
             
             container.prepend(logoutButton);
             container.prepend(historyButton);
+
+            if (isAdmin) {
+                const requestsButton = document.createElement('button');
+                requestsButton.id = 'requests-btn';
+                requestsButton.innerHTML = '<i class="fas fa-inbox"></i>';
+                requestsButton.title = "Solicitudes Pendientes";
+                requestsButton.className = "header-btn";
+                requestsButton.onclick = () => { window.location.href = 'solicitudes.html'; };
+                container.prepend(requestsButton);
+            }
         }
         
         function init() {
             orgNav.innerHTML = '';
-            contentTitle.textContent = `Bienvenido, ${currentUsername}`;
             
+            let welcomeMessage = `Bienvenido, ${currentUsername}`;
+            if (userAreaId && userAreaId !== 'null') { 
+                const areaName = getAreaNameById(orgStructure, userAreaId);
+                if (areaName) {
+                    welcomeMessage += ` del área ${areaName}`;
+                }
+            }
+            contentTitle.textContent = welcomeMessage;
+
+            setupHeaderButtons();
+
+            const searchContainer = document.querySelector('.sidebar-search-container');
             if (isAdmin) {
+                if (searchContainer) searchContainer.style.display = 'block';
+
                 const allAreasButton = document.createElement('div');
                 allAreasButton.id = 'all-areas-btn';
                 allAreasButton.className = 'node-content';
@@ -459,6 +518,8 @@ if (isOnLoginPage) {
                 buildOrgTree(orgStructure, orgNav);
                 selectNode(null, { id: '', name: 'Todas las Áreas' });
             } else {
+                if (searchContainer) searchContainer.style.display = 'none';
+
                 const initialNodeData = findNodeWithParents(userAreaId, orgStructure);
                 const userSpecificStructure = filterOrgStructureForUser(orgStructure, userAreaId);
                 
@@ -468,7 +529,6 @@ if (isOnLoginPage) {
                     tableView.innerHTML = userAreaId ? 
                         `<p class="error-message"><b>Error:</b> Su área asignada ('${userAreaId}') no se encontró.</p>` :
                         '<p class="error-message">No tiene un área asignada. Contacte a un administrador.</p>';
-                    buildOrgTree(orgStructure, orgNav);
                 } else {
                     buildOrgTree(userSpecificStructure, orgNav);
                     if (initialNodeData && initialNodeData.node) {
@@ -480,7 +540,6 @@ if (isOnLoginPage) {
                     }
                 }
             }
-            setupHeaderButtons();
         }
 
         init();
@@ -489,11 +548,44 @@ if (isOnLoginPage) {
         const chatbotToggleBtn = document.getElementById('chatbot-toggle-btn');
         const closeChatbotBtn = document.getElementById('close-chatbot-btn');
 
-        const toggleChatbot = () => {
-            if(chatbotContainer) chatbotContainer.classList.toggle('active');
-        };
+        if (chatbotToggleBtn && chatbotContainer && closeChatbotBtn) {
+            const toggleChatbot = () => chatbotContainer.classList.toggle('active');
+            chatbotToggleBtn.addEventListener('click', toggleChatbot);
+            closeChatbotBtn.addEventListener('click', toggleChatbot);
+        }
 
-        if (chatbotToggleBtn) chatbotToggleBtn.addEventListener('click', toggleChatbot);
-        if (closeChatbotBtn) closeChatbotBtn.addEventListener('click', toggleChatbot);
-    });
-}
+        const orgSearchInput = document.getElementById('org-search-input');
+        if (orgSearchInput) {
+            orgSearchInput.addEventListener('input', () => {
+                const searchTerm = orgSearchInput.value.toLowerCase().trim();
+                const allNodes = orgNav.querySelectorAll('#org-nav li');
+
+                allNodes.forEach(li => {
+                    const nodeNameElement = li.querySelector('.node-content > span:last-of-type');
+                    const nodeName = nodeNameElement ? nodeNameElement.textContent.toLowerCase() : '';
+                    if (nodeName.includes(searchTerm)) {
+                        li.style.display = "";
+                        let parent = li.parentElement.closest('li');
+                        while(parent) {
+                            parent.style.display = "";
+                            parent.classList.add('expanded');
+                            const toggle = parent.querySelector('.toggle');
+                            if(toggle) toggle.textContent = '▾';
+                            parent = parent.parentElement.closest('li');
+                        }
+                    } else {
+                        li.style.display = "none";
+                    }
+                });
+                if(!searchTerm) {
+                     allNodes.forEach(li => {
+                        li.style.display = "";
+                        li.classList.remove('expanded');
+                        const toggle = li.querySelector('.toggle');
+                        if(toggle && toggle.textContent === '▾') toggle.textContent = '▸';
+                     });
+                }
+            });
+        }
+    }
+});

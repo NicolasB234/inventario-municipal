@@ -587,5 +587,36 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
             });
         }
+        
+        // --- INICIO DE CÓDIGO PARA MODAL DE IMAGEN ---
+        const imageModal = document.getElementById('image-modal');
+        if (imageModal) {
+            const closeBtn = imageModal.querySelector('#close-image-modal');
+            if(closeBtn) {
+                closeBtn.addEventListener('click', () => {
+                    imageModal.style.display = "none";
+                });
+            }
+            imageModal.addEventListener('click', (e) => {
+                 if (e.target === imageModal) {
+                    imageModal.style.display = "none";
+                 }
+            });
+        }
+        
+        const galleryView = document.getElementById('gallery-view');
+        if(galleryView) {
+            galleryView.addEventListener('click', (event) => {
+                const imgContainer = event.target.closest('.gallery-card-img');
+                if (imgContainer && imgContainer.src) {
+                    if (imageModal) {
+                        const modalImg = document.getElementById('modal-image');
+                        modalImg.src = imgContainer.src;
+                        imageModal.style.display = "flex";
+                    }
+                }
+            });
+        }
+        // --- FIN DE CÓDIGO PARA MODAL DE IMAGEN ---
     }
 });

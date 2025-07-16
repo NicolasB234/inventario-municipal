@@ -431,7 +431,7 @@ body.dark-mode input, body.dark-mode select, body.dark-mode textarea { backgroun
 body.dark-mode #inventory-table, body.dark-mode .log-table { background-color: var(--color-superficie); }
 body.dark-mode #inventory-table th, body.dark-mode .log-table th { background-color: #3c3c3c; }
 body.dark-mode #inventory-table td, body.dark-mode .log-table td { border-color: var(--color-borde); color: var(--color-texto-secundario); }
-body.dark-mode #inventory-table tbody tr:hover, body.dark-mode .log-table tbody tr:hover { background-color: #3d3d3d; }
+body.dark-mode #inventory-table tbody tr:hover, body.dark-mode .log-table tr:hover { background-color: #3d3d3d; }
 body.dark-mode .log-table tr:nth-child(even) { background-color: #2f2f2f; }
 body.dark-mode #org-nav .node-content:hover, body.dark-mode .filter-controls-container, body.dark-mode #area-search-results .result-item:hover { background-color: #3d3d3d; }
 body.dark-mode .request-header, body.dark-mode .request-footer { background-color: rgba(255,255,255,0.05); }
@@ -503,4 +503,36 @@ body.night-mode .request-header, body.night-mode .request-footer { background-co
     #toggle-filters-btn {
         display: none;
     }
+}
+
+/* --- ESTILOS PARA EL MODAL DE IMAGEN --- */
+#image-modal {
+    z-index: 3000;
+}
+
+#image-modal .image-modal-content {
+    margin: auto;
+    display: block;
+    width: auto;
+    max-width: 90vw;
+    height: auto;
+    max-height: 90vh;
+}
+
+#image-modal .close-modal {
+    position: absolute;
+    top: 15px;
+    right: 35px;
+    color: #f1f1f1;
+    font-size: 40px;
+    font-weight: bold;
+    transition: 0.3s;
+    cursor: pointer;
+}
+
+#image-modal .close-modal:hover,
+#image-modal .close-modal:focus {
+    color: #bbb;
+    text-decoration: none;
+    cursor: pointer;
 }

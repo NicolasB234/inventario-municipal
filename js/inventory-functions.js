@@ -510,29 +510,22 @@ function renderTable(node, items, isAdmin) {
 function renderGallery(items, isAdmin) {
     const galleryContainer = document.getElementById('gallery-container');
     if (!galleryContainer) return;
-    galleryContainer.innerHTML = '';
 
-    if (items.length === 0) {
-        galleryContainer.innerHTML = '<p>No hay ítems para mostrar en esta área.</p>';
-        return;
-    }
-    
     const itemsWithImages = items.filter(item => item.imagePath);
 
     if (itemsWithImages.length === 0) {
-        galleryContainer.innerHTML = '<p>Ningún ítem en esta vista tiene una imagen asociada.</p>';
+        galleryContainer.innerHTML = items.length > 0
+            ? '<p>Ningún ítem en esta vista tiene una imagen asociada.</p>'
+            : '<p>No hay ítems para mostrar en esta área.</p>';
         return;
     }
 
-    itemsWithImages.forEach(item => {
-        const card = document.createElement('div');
-        card.className = 'gallery-card';
-        card.innerHTML = `
+    galleryContainer.innerHTML = itemsWithImages.map(item => `
+        <div class="gallery-card">
             <div class="gallery-card-img-container">
                 <img src="${item.imagePath}" alt="${item.name}" class="gallery-card-img">
             </div>
             <div class="gallery-card-title">${item.name}</div>
-        `;
-        galleryContainer.appendChild(card);
-    });
+        </div>
+    `).join('');
 }

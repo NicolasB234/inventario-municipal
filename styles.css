@@ -22,11 +22,11 @@
 
 body {
     font-family: 'Open Sans', sans-serif;
-    /* ESTILO COMPACTO: Espaciado entre líneas reducido */
     line-height: 1.5; 
     color: var(--color-texto-secundario);
     background-color: var(--color-fondo);
     transition: background-color 0.3s, color 0.3s;
+    zoom: 90%;
 }
 
 /* --- ESTILOS ESPECÍFICOS POR PÁGINA --- */
@@ -611,4 +611,93 @@ body.night-mode .notifications-list .notif-area {
 .details-grid strong {
     color: var(--color-texto-secundario);
     margin-right: 8px;
+}
+
+/* --- ESTILOS PARA EL MODAL DE IMAGEN (VERSIÓN FINAL Y LIMPIA) --- */
+
+#image-modal {
+    z-index: 3000; /* Asegura que el modal esté por encima de todo */
+}
+
+.image-modal-container {
+    display: flex;
+    flex-direction: column; /* Apila la imagen y los detalles verticalmente */
+    width: 60vw; /* Ancho del 60% de la ventana */
+    max-width: 800px; /* Pero no más de 800px en pantallas grandes */
+    height: 85vh; /* Altura del 85% de la ventana */
+    background-color: var(--color-superficie);
+    border-radius: var(--radio-borde);
+    box-shadow: 0 5px 20px rgba(0,0,0,0.5);
+    overflow: hidden; /* Mantiene los bordes redondeados */
+    animation: fadeIn 0.3s;
+}
+
+.image-modal-content { /* La imagen */
+    flex-shrink: 0; /* Evita que la imagen se encoja si el texto es muy largo */
+    height: 55%; /* La imagen ahora ocupa el 55% de la altura del modal */
+    width: 100%;
+    object-fit: contain; /* Asegura que la imagen se vea completa y sin deformarse */
+    background-color: #1c1c1c; /* Fondo oscuro para la imagen */
+    border-bottom: 1px solid var(--color-borde);
+}
+
+.image-modal-details { /* Los detalles del ítem */
+    flex-grow: 1; /* Permite que esta sección ocupe todo el espacio restante */
+    padding: 20px 25px;
+    overflow-y: auto; /* AÑADE UNA BARRA DE SCROLL SI EL TEXTO ES MUY LARGO */
+    text-align: left;
+}
+
+.image-modal-details h3 {
+    margin-top: 0;
+    margin-bottom: 15px;
+    font-size: 1.6em;
+    color: var(--color-primario);
+}
+
+.image-modal-details p {
+    margin: 0 0 15px 0;
+    line-height: 1.6;
+}
+
+.image-modal-details hr {
+    border: none;
+    border-top: 1px solid var(--color-borde);
+    margin: 15px 0;
+}
+
+.details-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px 20px;
+}
+
+.details-grid p {
+    margin: 5px 0;
+    font-size: 0.9em;
+}
+
+.details-grid strong {
+    color: var(--color-texto-secundario);
+    margin-right: 8px;
+}
+
+/* Estilo para el botón de cerrar del modal */
+#image-modal .close-modal {
+    color: #fff;
+    position: absolute;
+    top: 10px;
+    right: 25px;
+    font-size: 35px;
+    font-weight: bold;
+    transition: 0.3s;
+    z-index: 10; /* Para que esté por encima de la imagen */
+    text-shadow: 0 1px 5px rgba(0,0,0,0.7);
+}
+
+#image-modal .close-modal:hover,
+#image-modal .close-modal:focus {
+    color: #bbb;
+    text-decoration: none;
+    cursor: pointer;
 }

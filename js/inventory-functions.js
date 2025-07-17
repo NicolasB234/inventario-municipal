@@ -1,19 +1,18 @@
-import { addNotification } from './script.js';
 import { orgStructure } from './org-structure.js';
 
 const API_URL = 'php/';
 
-const categories = [
+export const categories = [
     'Informática', 'Electrónica', 'Mobiliario', 'Vehículos', 'Equipamiento',
     'Herramientas', 'Materiales', 'Oficina', 'Otros electrónicos', 'Servicios',
     'Mobiliario Depósito', 'Equipamiento Logístico', 'Equipamiento Oficina'
 ];
 
-const statusOptions = [
+export const statusOptions = [
     { value: 'A', label: 'Apto' },
     { value: 'N', label: 'No Apto' },
     { value: 'R', label: 'Recuperable' },
-    { value: 'B', label: 'De Baja' }
+    
 ];
 
 function getShortNameNodesMap() {
@@ -30,6 +29,24 @@ function getShortNameNodesMap() {
     return map;
 }
 const nodesMap = getShortNameNodesMap();
+
+function getAllInventoryNodes(structure) {
+    let nodes = [];
+    function traverse(arr, path = []) {
+        arr.forEach(item => {
+            const currentPath = [...path, item.name];
+            if (['departamento', 'coordinacion', 'area', 'direccion', 'subdireccion', 'subsecretaria', 'secretaria', 'celda', 'intendencia', 'viceintendencia'].includes(item.type)) {
+                nodes.push({ id: item.id, name: currentPath.join(' > ') });
+            }
+            if (item.children) {
+                traverse(item.children, currentPath);
+            }
+        });
+    }
+    traverse(structure);
+    return nodes;
+}
+
 
 function getFullPathNodesMap() {
     const map = new Map();
@@ -56,9 +73,65 @@ export function showItemForm(node, item = null) {
     const isEditing = item !== null;
     form.reset();
 
+    const areaSelectionRow = document.getElementById('area-selection-row');
+    const nodeIdInput = form.querySelector('[name="node_id"]');
+    const areaSearchInput = document.getElementById('area-search-input-modal');
+    
+    const newAreaSearchInput = areaSearchInput.cloneNode(true);
+    areaSearchInput.parentNode.replaceChild(newAreaSearchInput, areaSearchInput);
+    
+    if (!isEditing && node.id === '') {
+        areaSelectionRow.style.display = 'block';
+        newAreaSearchInput.required = true;
+        nodeIdInput.value = '';
+
+        const searchResults = document.getElementById('area-search-results-modal');
+        const allAreas = getAllInventoryNodes(orgStructure);
+
+        const searchHandler = () => {
+            const query = newAreaSearchInput.value.toLowerCase().trim();
+            searchResults.innerHTML = '';
+            nodeIdInput.value = '';
+            if (query.length < 2) {
+                searchResults.style.display = 'none';
+                return;
+            }
+            const filteredAreas = allAreas.filter(area => area.name.toLowerCase().includes(query));
+            if (filteredAreas.length > 0) {
+                filteredAreas.forEach(area => {
+                    const itemDiv = document.createElement('div');
+                    itemDiv.className = 'result-item';
+                    itemDiv.textContent = area.name;
+                    itemDiv.addEventListener('click', () => {
+                        newAreaSearchInput.value = area.name;
+                        nodeIdInput.value = area.id;
+                        searchResults.style.display = 'none';
+                    });
+                    searchResults.appendChild(itemDiv);
+                });
+                searchResults.style.display = 'block';
+            } else {
+                searchResults.style.display = 'none';
+            }
+        };
+        newAreaSearchInput.addEventListener('input', searchHandler);
+
+        document.addEventListener('click', function hideResults(e) {
+            if (!e.target.closest('.search-container')) {
+                searchResults.style.display = 'none';
+                document.removeEventListener('click', hideResults); 
+            }
+        }, { once: true });
+
+    } else {
+        areaSelectionRow.style.display = 'none';
+        newAreaSearchInput.required = false;
+        nodeIdInput.value = isEditing ? (item.node_id || '') : node.id;
+    }
+
+
     modal.querySelector('h2').textContent = isEditing ? `Editar Ítem: ${item.name}` : 'Agregar Nuevo Ítem';
     form.querySelector('[name="id"]').value = isEditing ? item.id : '';
-    form.querySelector('[name="node_id"]').value = node.id;
     form.querySelector('[name="existingImagePath"]').value = isEditing && item.imagePath ? item.imagePath : '';
     form.querySelector('[name="name"]').value = isEditing ? item.name : '';
     form.querySelector('[name="quantity"]').value = isEditing ? item.quantity : 1;
@@ -100,9 +173,14 @@ export function showItemForm(node, item = null) {
 
     currentFormSubmitHandler = async (event) => {
         event.preventDefault();
+
+        if (!isEditing && node.id === '' && !form.querySelector('[name="node_id"]').value) {
+            alert('Por favor, seleccione un área de destino para el nuevo ítem.');
+            return;
+        }
+
         const formData = new FormData(form);
         const endpoint = isEditing ? 'update_item.php' : 'add_item.php';
-        const isAdmin = sessionStorage.getItem('isAdmin') === 'true';
         
         try {
             const response = await fetch(API_URL + endpoint, { method: 'POST', body: formData });
@@ -111,12 +189,9 @@ export function showItemForm(node, item = null) {
             alert(result.message);
 
             if (result.success) {
-                addNotification(result.message);
-                
                 closeItemForm();
-                if (isAdmin || !isEditing) {
-                    displayInventory(node, isAdmin);
-                }
+                const isAdmin = sessionStorage.getItem('isAdmin') === 'true';
+                displayInventory(node, isAdmin);
             }
         } catch (error) {
             console.error('Error al guardar:', error);
@@ -197,9 +272,7 @@ function showTransferForm(node, items) {
         e.preventDefault();
         const formData = new FormData(e.target);
         if (!confirm(`¿Está seguro de que desea solicitar el traspaso de este ítem?`)) return;
-
-        const isAdmin = sessionStorage.getItem('isAdmin') === 'true';
-
+        
         try {
             const response = await fetch(`${API_URL}transfer_item.php`, { method: 'POST', body: formData });
             const result = await response.json();
@@ -207,8 +280,8 @@ function showTransferForm(node, items) {
             alert(result.message);
 
             if (result.success) {
-                addNotification(result.message);
                 closeModal();
+                const isAdmin = sessionStorage.getItem('isAdmin') === 'true';
                 if (isAdmin) {
                     displayInventory(node, isAdmin);
                 }
@@ -260,18 +333,20 @@ export async function displayInventory(node, isAdmin = false) {
         if (result.success) {
             setupInventoryUI(node, result.data, isAdmin);
             renderTable(node, result.data, isAdmin);
-            if (galleryView) renderGallery(result.data, isAdmin); 
+            renderGallery(result.data, isAdmin); 
         } else {
             const errorMessage = `<p>Error al cargar el inventario: ${result.message}</p>`;
             tableView.innerHTML = errorMessage;
-            if (galleryView) galleryView.querySelector('#gallery-container').innerHTML = errorMessage;
+            const galleryContainer = document.getElementById('gallery-container');
+            if (galleryContainer) galleryContainer.innerHTML = errorMessage;
             document.getElementById('global-controls-container').innerHTML = '';
         }
     } catch (error) {
         console.error('Error al obtener el inventario:', error);
         const connErrorMessage = '<p>Error de conexión al cargar el inventario.</p>';
         tableView.innerHTML = connErrorMessage;
-        if (galleryView) galleryView.querySelector('#gallery-container').innerHTML = connErrorMessage;
+        const galleryContainer = document.getElementById('gallery-container');
+        if (galleryContainer) galleryContainer.innerHTML = connErrorMessage;
     }
 }
 
@@ -350,7 +425,6 @@ function setupInventoryUI(node, items, isAdmin) {
         renderGallery(items, isAdmin);
     });
 
-    // --- INICIO DE LA CORRECCIÓN ---
     const importBtn = document.getElementById('import-xlsx-btn');
     const fileInput = document.getElementById('xlsx-file-input');
     importBtn.addEventListener('click', () => fileInput.click());
@@ -410,10 +484,7 @@ function setupInventoryUI(node, items, isAdmin) {
                 alert(result.message);
 
                 if (result.success) {
-                    addNotification(result.message);
-                    if (isAdmin) {
-                        displayInventory(node, isAdmin);
-                    }
+                    displayInventory(node, isAdmin);
                 }
             } catch (error) {
                 console.error('Error durante la importación:', error);
@@ -423,7 +494,6 @@ function setupInventoryUI(node, items, isAdmin) {
         reader.readAsArrayBuffer(file);
         fileInput.value = '';
     });
-    // --- FIN DE LA CORRECCIÓN ---
 }
 
 function renderTable(node, items, isAdmin) {
@@ -465,7 +535,7 @@ function renderTable(node, items, isAdmin) {
                             <td>${statusOptions.find(s => s.value === item.status)?.label || 'Desconocido'}</td>
                             <td class="actions">
                                 <button class="edit-btn" data-item-id="${item.id}"><i class="fas fa-edit"></i></button>
-                                <button class="delete-btn" data-item-id="${item.id}"><i class="fas fa-trash-alt"></i></button>
+                                <button class="delete-btn" data-item-id="${item.id}" title="Dar de baja"><i class="fas fa-arrow-down"></i></button>
                             </td>
                         </tr>
                     `).join('')}
@@ -484,23 +554,26 @@ function renderTable(node, items, isAdmin) {
     tableContainer.querySelectorAll('.delete-btn').forEach(button => {
         button.addEventListener('click', async () => {
             const itemToDelete = items.find(i => i.id == button.dataset.itemId);
-            if (confirm(`¿Está seguro de que desea solicitar la eliminación del ítem "${itemToDelete.name}"?`)) {
+            if (confirm(`¿Estás seguro de que deseas solicitar la BAJA del ítem "${itemToDelete.name}"? Esta acción no se puede deshacer.`)) {
                 try {
                     const formData = new FormData();
                     formData.append('id', itemToDelete.id);
-                    const response = await fetch(API_URL + 'delete_item.php', { method: 'POST', body: formData });
-                    const result = await response.json();
                     
-                    alert(result.message);
+                    const response = await fetch(API_URL + 'delete_item.php', { method: 'POST', body: formData });
 
-                    if (result.success) {
-                        addNotification(result.message);
-                        if (isAdmin) {
+                    if (response.ok) {
+                        const result = await response.json();
+                        alert(result.message); 
+                        if (result.success) {
                             displayInventory(node, isAdmin);
                         }
+                    } else {
+                        throw new Error('El servidor respondió con un error.');
                     }
+
                 } catch (error) {
-                    alert('Error de conexión al eliminar.');
+                    console.error('Error al intentar dar de baja el ítem:', error);
+                    alert('Error de conexión al procesar la solicitud de baja.');
                 }
             }
         });
@@ -521,7 +594,14 @@ function renderGallery(items, isAdmin) {
     }
 
     galleryContainer.innerHTML = itemsWithImages.map(item => `
-        <div class="gallery-card">
+        <div class="gallery-card" 
+             data-name="${item.name}" 
+             data-description="${item.description || 'Sin descripción.'}" 
+             data-category="${item.category}"
+             data-quantity="${item.quantity}"
+             data-status="${statusOptions.find(s => s.value === item.status)?.label || 'Desconocido'}"
+             data-date="${item.acquisitionDate || 'No especificada'}"
+             data-img-src="${item.imagePath}">
             <div class="gallery-card-img-container">
                 <img src="${item.imagePath}" alt="${item.name}" class="gallery-card-img">
             </div>

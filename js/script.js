@@ -1,116 +1,185 @@
+// --- INICIO DE LA CORRECCIÓN ---
+// Se elimina la importación innecesaria y errónea de 'statusOptions'.
 import { orgStructure } from './org-structure.js';
 import { displayInventory, setupModalClosers } from './inventory-functions.js';
+// --- FIN DE LA CORRECCIÓN ---
 
 const PHP_BASE_URL = 'php/';
 
-// Esta función ahora SOLO se encarga de la parte visual de la campanita.
-export function addNotification(message) {
-    // Almacenamos el mensaje en una lista temporal solo para mostrarlo en el panel.
-    const localNotifications = JSON.parse(localStorage.getItem('appNotifications')) || [];
-    const newNotification = {
-        id: Date.now(),
-        message: message,
-        timestamp: new Date().toISOString(),
-    };
-    localNotifications.unshift(newNotification);
-    if (localNotifications.length > 20) {
-        localNotifications.length = 20;
-    }
-    localStorage.setItem('appNotifications', JSON.stringify(localNotifications));
-
-    // Aumentamos el contador de "no leídas" para el efecto visual.
-    let unreadCount = parseInt(localStorage.getItem('unreadNotifications') || '0');
-    unreadCount++;
-    localStorage.setItem('unreadNotifications', unreadCount);
-    
-    updateNotificationCounter();
-
-    const notificationBellButton = document.getElementById('notification-bell-btn');
-    if (notificationBellButton) {
-        notificationBellButton.classList.add('new-notification');
-        setTimeout(() => {
-            notificationBellButton.classList.remove('new-notification');
-        }, 500);
-    }
-}
-
-function updateNotificationCounter() {
-    const notificationBellButton = document.getElementById('notification-bell-btn');
-    const notificationCounterElement = document.getElementById('notification-counter');
-    const unreadCount = parseInt(localStorage.getItem('unreadNotifications') || '0');
-
-    if (!notificationBellButton || !notificationCounterElement) {
-        return;
-    }
-
-    if (unreadCount > 0) {
-        notificationCounterElement.textContent = unreadCount;
-        notificationCounterElement.style.display = 'block';
-        notificationBellButton.classList.add('has-notifications');
-    } else {
-        notificationCounterElement.style.display = 'none';
-        notificationBellButton.classList.remove('has-notifications');
-    }
-}
-
-// --- INICIO DE LA CORRECCIÓN ---
-let lastNotificationId = 0; 
+// --- LÓGICA DE NOTIFICACIONES ---
+let localNotifications = [];
+let lastNotificationId = 0;
 let lastAdminRequestCount = 0;
+let lastAdminLogId = 0; 
+
+function addNotificationToList(notif) {
+    localNotifications.unshift({
+        id: notif.id,
+        message: notif.details,
+        timestamp: notif.timestamp
+    });
+    if (localNotifications.length > 20) localNotifications.pop();
+}
+
+function updateNotificationCounter(count) {
+    const counterElement = document.getElementById('notification-counter');
+    const bellButton = document.getElementById('notification-bell-btn');
+    if (!counterElement || !bellButton) return;
+
+    if (count > 0) {
+        counterElement.textContent = count;
+        counterElement.style.display = 'block';
+        bellButton.classList.add('has-notifications');
+    } else {
+        counterElement.style.display = 'none';
+        bellButton.classList.remove('has-notifications');
+    }
+}
+
+function shakeBell() {
+    const bellButton = document.getElementById('notification-bell-btn');
+    if (bellButton) {
+        bellButton.classList.add('new-notification');
+        setTimeout(() => bellButton.classList.remove('new-notification'), 500);
+    }
+}
 
 async function fetchUpdates() {
+    const isAdmin = sessionStorage.getItem('isAdmin') === 'true';
+    const lastId = isAdmin ? lastAdminLogId : lastNotificationId;
+    
     try {
-        const response = await fetch(`${PHP_BASE_URL}get_updates.php?last_id=${lastNotificationId}`);
+        const response = await fetch(`${PHP_BASE_URL}get_updates.php?last_id=${lastId}`);
         const data = await response.json();
-        const isAdmin = sessionStorage.getItem('isAdmin') === 'true';
 
-        // 1. Si el servidor nos envía notificaciones nuevas.
-        if (data.new_notifications && data.new_notifications.length > 0) {
-            data.new_notifications.forEach(notif => {
-                addNotification(notif.details); // Añadimos la notificación a la campanita.
-                lastNotificationId = Math.max(lastNotificationId, notif.id);
-            });
-        }
+        if (isAdmin) {
+            const newRequestCount = data.pending_admin_requests || 0;
+            if (newRequestCount > lastAdminRequestCount) {
+                shakeBell();
+            }
+            updateNotificationCounter(newRequestCount);
+            lastAdminRequestCount = newRequestCount;
 
-        // 2. Si el servidor nos dice que refresquemos la vista del inventario.
-        if (data.refresh_inventory) {
-            const selectedNodeElement = document.querySelector('#org-nav .node-content.selected');
-            if (selectedNodeElement) {
-                const nodeId = selectedNodeElement.parentElement.dataset.nodeId;
-                const nodeName = selectedNodeElement.textContent.trim();
-                setTimeout(() => {
-                    displayInventory({ id: nodeId, name: nodeName }, isAdmin);
-                }, 500);
+            if (data.new_notifications && data.new_notifications.length > 0) {
+                data.new_notifications.forEach(notif => {
+                    addNotificationToList(notif);
+                    lastAdminLogId = Math.max(lastAdminLogId, notif.id);
+                });
+                
+                const selectedNodeElement = document.querySelector('#org-nav .node-content.selected');
+                if (selectedNodeElement) {
+                    const nodeId = (selectedNodeElement.id === 'all-areas-btn') ? '' : selectedNodeElement.parentElement.dataset.nodeId;
+                    const nodeName = selectedNodeElement.textContent.trim();
+                    displayInventory({ id: nodeId, name: nodeName }, true);
+                }
+            }
+        } else {
+            if (data.new_notifications && data.new_notifications.length > 0) {
+                data.new_notifications.forEach(notif => {
+                    addNotificationToList(notif);
+                    lastNotificationId = Math.max(lastNotificationId, notif.id);
+                });
+                shakeBell();
+                updateNotificationCounter(localNotifications.length);
+            }
+            
+            if (data.refresh_inventory) {
+                const selectedNodeElement = document.querySelector('#org-nav .node-content.selected');
+                if (selectedNodeElement) {
+                    const nodeId = selectedNodeElement.parentElement.dataset.nodeId;
+                    const nodeName = selectedNodeElement.textContent.trim();
+                    displayInventory({ id: nodeId, name: nodeName }, false);
+                }
             }
         }
-        
-        // 3. Si somos admin, actualizamos el número de la campanita con las solicitudes pendientes.
-        if (isAdmin) {
-             const notificationCounterElement = document.getElementById('notification-counter');
-             if (notificationCounterElement) {
-                if (data.pending_admin_requests > lastAdminRequestCount) {
-                    addNotification("Ha recibido una nueva solicitud pendiente de revisión.");
-                }
-                lastAdminRequestCount = data.pending_admin_requests;
-
-                if (lastAdminRequestCount > 0) {
-                    notificationCounterElement.textContent = lastAdminRequestCount;
-                    notificationCounterElement.style.display = 'block';
-                } else {
-                    notificationCounterElement.style.display = 'none';
-                }
-             }
-        }
-
     } catch (error) {
         console.error('Error en el polling de actualizaciones:', error);
     }
 }
 
-function startUpdatePolling() {
-    fetchUpdates(); // Verificamos al cargar la página.
-    setInterval(fetchUpdates, 15000); // Y luego cada 15 segundos.
+function initializeNotifications() {
+    fetch(`${PHP_BASE_URL}get_log.php`)
+        .then(res => res.json())
+        .then(result => {
+            if (result.success && result.data.length > 0) {
+                const latestId = result.data[0].id;
+                lastAdminLogId = latestId;
+                lastNotificationId = latestId;
+            }
+        })
+        .catch(err => console.error("Error al obtener el último ID de log:", err))
+        .finally(() => {
+            fetchUpdates();
+            setInterval(fetchUpdates, 5000);
+        });
 }
-// --- FIN DE LA CORRECCIÓN ---
+
+function toggleNotifPanel() {
+    const isAdmin = sessionStorage.getItem('isAdmin') === 'true';
+    const notificationBellButton = document.getElementById('notification-bell-btn');
+    const existingPanel = document.querySelector('.notifications-panel');
+    if (existingPanel) {
+        existingPanel.remove();
+        return;
+    }
+
+    const notifPanel = document.createElement('div');
+    notifPanel.className = 'notifications-panel';
+    let notificationsHtml = `<h3>${isAdmin ? 'Actividad del Sistema' : 'Mis Notificaciones'}</h3><div class="notifications-list">`;
+
+    if (isAdmin) {
+        if (localNotifications.length === 0 && lastAdminRequestCount === 0) {
+            notificationsHtml += '<p>No hay actividad reciente.</p>';
+        } else {
+            if (lastAdminRequestCount > 0) {
+                notificationsHtml += `<p>Hay <strong>${lastAdminRequestCount}</strong> solicitud(es) esperando revisión.</p>`;
+            }
+            localNotifications.forEach(notif => {
+                 const date = new Date(notif.timestamp).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' });
+                 const areaRegex = /(al área|del área|en el área|desde|hacia)\s'([^']+)'/g;
+                 const styledMessage = notif.message.replace(areaRegex, (match, keyword, areaName) => {
+                     return `${keyword} '<span class="notif-area">${areaName}</span>'`;
+                 });
+                 notificationsHtml += `<p>[${date}] <strong>${styledMessage}</strong></p>`;
+            });
+        }
+    } else {
+        if (localNotifications.length === 0) {
+            notificationsHtml += '<p>No hay notificaciones para mostrar.</p>';
+        } else {
+            localNotifications.forEach(notif => {
+                const date = new Date(notif.timestamp).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' });
+                const areaRegex = /(al área|del área|en el área|desde|hacia)\s'([^']+)'/g;
+                const styledMessage = notif.message.replace(areaRegex, (match, keyword, areaName) => {
+                    return `${keyword} '<span class="notif-area">${areaName}</span>'`;
+                });
+                notificationsHtml += `<p>[${date}] <strong>${styledMessage}</strong></p>`;
+            });
+        }
+    }
+    
+    const link = isAdmin ? 'solicitudes.html' : 'notificaciones.html';
+    const linkText = isAdmin ? `Ir a Solicitudes (${lastAdminRequestCount})` : 'Ver todo el historial';
+    notificationsHtml += `</div><a href="${link}" class="view-all-notifs">${linkText}</a>`;
+    
+    notifPanel.innerHTML = notificationsHtml;
+    document.body.appendChild(notifPanel);
+
+    localNotifications = [];
+    if (!isAdmin) {
+        updateNotificationCounter(0);
+    }
+
+    setTimeout(() => {
+        const closePanel = (e) => {
+            if (!notifPanel.contains(e.target) && e.target !== notificationBellButton && !notificationBellButton.contains(e.target)) {
+                notifPanel.remove();
+                document.removeEventListener('click', closePanel);
+            }
+        };
+        document.addEventListener('click', closePanel);
+    }, 0);
+}
 
 async function handleLogin(username, password) {
     const formData = new FormData();
@@ -154,7 +223,7 @@ function getAllInventoryNodes(structure) {
     function traverse(arr, path = []) {
         arr.forEach(item => {
             const currentPath = [...path, item.name];
-            if (['departamento', 'coordinacion', 'area', 'direction'].includes(item.type)) {
+            if (['departamento', 'coordinacion', 'area', 'direccion', 'subdireccion', 'subsecretaria', 'secretaria', 'celda', 'intendencia', 'viceintendencia'].includes(item.type)) {
                 nodes.push({ id: item.id, name: currentPath.join(' > ') });
             }
             if (item.children) {
@@ -166,79 +235,21 @@ function getAllInventoryNodes(structure) {
     return nodes;
 }
 
-function getAreaNameById(structure, id) {
-    for (const node of structure) {
-        if (node.id === id) return node.name;
-        if (node.children) {
-            const found = getAreaNameById(node.children, id);
-            if (found) return found;
+function findNodeById(id, nodes) {
+    for (const node of nodes) {
+        if (node.id === id) {
+            return node;
         }
-    }
-    return null;
-}
-
-function findNodeWithParents(id, structure, path = []) {
-    for (const node of structure) {
-        if (node.id === id) return { node, path: [...path, node.id] };
         if (node.children) {
-            const result = findNodeWithParents(id, node.children, [...path, node.id]);
-            if (result) return result;
-        }
-    }
-    return null;
-}
-
-function filterOrgStructureForUser(nodes, targetId) {
-    return nodes.map(node => {
-        if (node.id === targetId) return node;
-        if (node.children) {
-            const filteredChildren = filterOrgStructureForUser(node.children, targetId);
-            if (filteredChildren.length > 0) return { ...node, children: filteredChildren };
-        }
-        return null;
-    }).filter(Boolean);
-}
-
-function toggleNotifPanel() {
-    const notificationBellButton = document.getElementById('notification-bell-btn');
-    const existingPanel = document.querySelector('.notifications-panel');
-    if (existingPanel) {
-        existingPanel.remove();
-        return;
-    }
-
-    const notifPanel = document.createElement('div');
-    notifPanel.className = 'notifications-panel';
-    const localNotifications = JSON.parse(localStorage.getItem('appNotifications')) || [];
-    let notificationsHtml = '<h3>Actividad Reciente</h3><div class="notifications-list">';
-    if (localNotifications.length === 0) {
-        notificationsHtml += '<p>No hay notificaciones recientes.</p>';
-    } else {
-        localNotifications.forEach(notif => {
-            const date = new Date(notif.timestamp).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' });
-            notificationsHtml += `<p><strong>[${date}]</strong> ${notif.message}</p>`;
-        });
-    }
-    notificationsHtml += '</div><a href="notificaciones.html" class="view-all-notifs">Ver todo el historial</a>';
-    notifPanel.innerHTML = notificationsHtml;
-    document.body.appendChild(notifPanel);
-
-    localStorage.setItem('unreadNotifications', '0');
-    updateNotificationCounter();
-
-    setTimeout(() => {
-        const closePanel = (e) => {
-            if (!notifPanel.contains(e.target) && e.target !== notificationBellButton && !notificationBellButton.contains(e.target)) {
-                notifPanel.remove();
-                document.removeEventListener('click', closePanel);
+            const found = findNodeById(id, node.children);
+            if (found) {
+                return found;
             }
-        };
-        document.addEventListener('click', closePanel);
-    }, 0);
+        }
+    }
+    return null;
 }
 
-
-// --- LÓGICA PRINCIPAL AL CARGAR LA PÁGINA ---
 document.addEventListener('DOMContentLoaded', async () => {
 
     if (document.getElementById('login-section')) {
@@ -351,7 +362,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             notificationBellButton.addEventListener('click', toggleNotifPanel);
         }
         
-        startUpdatePolling(); // Iniciamos el polling aquí.
+        initializeNotifications(); 
         
         const viewButtons = document.querySelectorAll('.view-btn');
         const viewSections = document.querySelectorAll('.view-section');
@@ -413,16 +424,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (toggle) {
                 toggle.textContent = liElement.classList.contains('expanded') ? '▾' : '▸';
             }
-        }
-
-        function expandParents(nodePath) {
-            if (!nodePath) return;
-            nodePath.forEach(id => {
-                const liElement = orgNav.querySelector(`li[data-node-id="${id}"]`);
-                if (liElement && !liElement.classList.contains('expanded')) {
-                    toggleNode(liElement);
-                }
-            });
         }
 
         const sidebarToggleBtn = document.getElementById('sidebar-toggle-btn');
@@ -493,57 +494,43 @@ document.addEventListener('DOMContentLoaded', async () => {
         function init() {
             orgNav.innerHTML = '';
             
-            let welcomeMessage = `Bienvenido, ${currentUsername}`;
-            if (userAreaId && userAreaId !== 'null') { 
-                const areaName = getAreaNameById(orgStructure, userAreaId);
-                if (areaName) {
-                    welcomeMessage += ` del área ${areaName}`;
-                }
-            }
+            const welcomeMessage = `Bienvenido, ${currentUsername}`;
             contentTitle.textContent = welcomeMessage;
-
             setupHeaderButtons();
-
             const searchContainer = document.querySelector('.sidebar-search-container');
+
             if (isAdmin) {
                 if (searchContainer) searchContainer.style.display = 'block';
-
                 const allAreasButton = document.createElement('div');
                 allAreasButton.id = 'all-areas-btn';
                 allAreasButton.className = 'node-content';
                 allAreasButton.innerHTML = `<i class="fas fa-globe" style="margin-right: 10px;"></i> Todas las Áreas`;
                 allAreasButton.onclick = () => selectNode(null, { id: '', name: 'Todas las Áreas' });
                 orgNav.appendChild(allAreasButton);
-
                 buildOrgTree(orgStructure, orgNav);
                 selectNode(null, { id: '', name: 'Todas las Áreas' });
             } else {
                 if (searchContainer) searchContainer.style.display = 'none';
-
-                const initialNodeData = findNodeWithParents(userAreaId, orgStructure);
-                const userSpecificStructure = filterOrgStructureForUser(orgStructure, userAreaId);
+                const userNode = findNodeById(userAreaId, orgStructure);
                 
-                if (!userAreaId || (userSpecificStructure.length === 0 && userAreaId)) {
-                    contentTitle.textContent = userAreaId ? 'Error de Configuración' : `Bienvenido, ${currentUsername}`;
-                    const tableView = document.getElementById('table-view');
-                    tableView.innerHTML = userAreaId ? 
-                        `<p class="error-message"><b>Error:</b> Su área asignada ('${userAreaId}') no se encontró.</p>` :
-                        '<p class="error-message">No tiene un área asignada. Contacte a un administrador.</p>';
+                if (!userNode) {
+                    contentTitle.textContent = 'Error de Configuración';
+                    document.getElementById('table-view').innerHTML = `<p class="error-message"><b>Error:</b> Su área asignada ('${userAreaId}') no se encontró.</p>`;
                 } else {
-                    buildOrgTree(userSpecificStructure, orgNav);
-                    if (initialNodeData && initialNodeData.node) {
-                        const nodeElement = orgNav.querySelector(`li[data-node-id="${initialNodeData.node.id}"]`);
-                        if (nodeElement) {
-                           selectNode(nodeElement, initialNodeData.node);
-                           expandParents(initialNodeData.path);
-                        }
+                    const userAreaStructure = [userNode];
+                    buildOrgTree(userAreaStructure, orgNav);
+                    
+                    const nodeElement = orgNav.querySelector(`li[data-node-id="${userNode.id}"]`);
+                    if (nodeElement) {
+                       selectNode(nodeElement, userNode);
+                       nodeElement.classList.add('expanded');
                     }
                 }
             }
         }
 
         init();
-
+        
         const chatbotContainer = document.getElementById('chatbot-container');
         const chatbotToggleBtn = document.getElementById('chatbot-toggle-btn');
         const closeChatbotBtn = document.getElementById('close-chatbot-btn');
@@ -588,7 +575,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             });
         }
         
-        // --- INICIO DE CÓDIGO PARA MODAL DE IMAGEN ---
         const imageModal = document.getElementById('image-modal');
         if (imageModal) {
             const closeBtn = imageModal.querySelector('#close-image-modal');
@@ -598,7 +584,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 });
             }
             imageModal.addEventListener('click', (e) => {
-                 if (e.target === imageModal) {
+                 if (e.target.classList.contains('modal-overlay')) {
                     imageModal.style.display = "none";
                  }
             });
@@ -607,16 +593,21 @@ document.addEventListener('DOMContentLoaded', async () => {
         const galleryView = document.getElementById('gallery-view');
         if(galleryView) {
             galleryView.addEventListener('click', (event) => {
-                const imgContainer = event.target.closest('.gallery-card-img');
-                if (imgContainer && imgContainer.src) {
-                    if (imageModal) {
-                        const modalImg = document.getElementById('modal-image');
-                        modalImg.src = imgContainer.src;
-                        imageModal.style.display = "flex";
-                    }
+                const card = event.target.closest('.gallery-card');
+                if (card && imageModal) {
+                    const data = card.dataset;
+                    
+                    document.getElementById('modal-image').src = data.imgSrc;
+                    document.getElementById('modal-item-name').textContent = data.name;
+                    document.getElementById('modal-item-description').textContent = data.description;
+                    document.getElementById('modal-item-category').textContent = data.category;
+                    document.getElementById('modal-item-quantity').textContent = data.quantity;
+                    document.getElementById('modal-item-status').textContent = data.status;
+                    document.getElementById('modal-item-date').textContent = data.date;
+
+                    imageModal.style.display = "flex";
                 }
             });
         }
-        // --- FIN DE CÓDIGO PARA MODAL DE IMAGEN ---
     }
 });

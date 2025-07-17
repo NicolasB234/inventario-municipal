@@ -4,7 +4,7 @@
 function log_activity($conn, $user_id, $username, $action_type, $details, $recipient_user_id = null) {
     // Usamos un 'try-catch' para que un fallo en el log no detenga la acción principal.
     try {
-        // --- INICIO DE LA CORRECCIÓN ---
+        // --- INICIO DE LA CORRECIÓN ---
         // La consulta ahora incluye la nueva columna para el destinatario.
         $stmt = $conn->prepare(
             "INSERT INTO activity_log (user_id, username, action_type, details, recipient_user_id) VALUES (?, ?, ?, ?, ?)"

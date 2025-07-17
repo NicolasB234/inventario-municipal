@@ -13,21 +13,6 @@ if (!$is_admin) {
     exit;
 }
 
-function createAreaMap($structure) {
-    $map = [];
-    $traverse = function ($nodes, $path, &$map) use (&$traverse) {
-        foreach ($nodes as $node) {
-            $currentPath = array_merge($path, [$node['name']]);
-            $map[implode(' > ', $currentPath)] = $node['id'];
-            if (!empty($node['children'])) {
-                $traverse($node['children'], $currentPath, $map);
-            }
-        }
-    };
-    $traverse($structure, [], $map);
-    return $map;
-}
-
 $action_id = isset($_POST['action_id']) ? (int)$_POST['action_id'] : 0;
 $review_status = isset($_POST['status']) ? $_POST['status'] : '';
 $review_comment = isset($_POST['comment']) ? trim($_POST['comment']) : '';
@@ -57,36 +42,31 @@ try {
     $item_name_for_log = $data['item_name'] ?? ('ID ' . ($data['item_id'] ?? ($data['id'] ?? 'desconocido')));
     $log_details = '';
     $log_action_type = '';
+    
+    // Para que el mensaje sea más legible ("dar de baja" en lugar de "decommission")
+    $action_text = $action['action_type'];
+    if ($action['action_type'] === 'decommission') {
+        $action_text = 'dar de baja';
+    }
 
     if ($review_status === 'approved') {
         switch ($action['action_type']) {
             case 'edit':
-                // --- INICIO DE LA CORRECCIÓN ---
-                // La consulta de actualización ahora incluye 'imagePath' y tiene los parámetros correctos.
                 $stmt_edit = $conn->prepare("UPDATE inventory_items SET name = ?, quantity = ?, category = ?, description = ?, acquisitionDate = ?, status = ?, imagePath = ? WHERE id = ?");
-                $stmt_edit->bind_param(
-                    "sisssssi",
-                    $data['name'],
-                    $data['quantity'],
-                    $data['category'],
-                    $data['description'],
-                    $data['acquisitionDate'],
-                    $data['status'],
-                    $data['imagePath'], // Se asegura de que la ruta de la imagen se mantenga.
-                    $data['id']
-                );
+                $stmt_edit->bind_param("sisssssi", $data['name'], $data['quantity'], $data['category'], $data['description'], $data['acquisitionDate'], $data['status'], $data['imagePath'], $data['id']);
                 if (!$stmt_edit->execute()) throw new Exception('Error al actualizar el ítem.');
                 $stmt_edit->close();
-                // --- FIN DE LA CORRECCIÓN ---
                 break;
-
-            case 'delete':
-                $stmt_delete = $conn->prepare("DELETE FROM inventory_items WHERE id = ?");
-                $stmt_delete->bind_param("i", $data['item_id']);
-                if (!$stmt_delete->execute()) throw new Exception('Error al eliminar el ítem.');
-                $stmt_delete->close();
+            // --- INICIO DE LA CORRECCIÓN ---
+            // Se añade el caso para procesar la acción 'decommission'.
+            case 'decommission':
+                // Al aprobar, se actualiza el estado a 'B' (De Baja).
+                $stmt_decommission = $conn->prepare("UPDATE inventory_items SET status = 'B' WHERE id = ?");
+                $stmt_decommission->bind_param("i", $data['item_id']);
+                if (!$stmt_decommission->execute()) throw new Exception('Error al dar de baja el ítem.');
+                $stmt_decommission->close();
                 break;
-
+            // --- FIN DE LA CORRECCIÓN ---
             case 'transfer':
                 $stmt_transfer = $conn->prepare("UPDATE inventory_items SET node_id = ? WHERE id = ?");
                 $stmt_transfer->bind_param("si", $data['destination_node_id'], $data['item_id']);
@@ -95,10 +75,10 @@ try {
                 break;
         }
         $log_action_type = 'request_approved';
-        $log_details = "Su solicitud para {$action['action_type']} el ítem '{$item_name_for_log}' ha sido APROBADA.";
+        $log_details = "Su solicitud para {$action_text} el ítem '{$item_name_for_log}' ha sido APROBADA.";
     } else {
         $log_action_type = 'request_rejected';
-        $log_details = "Su solicitud para {$action['action_type']} el ítem '{$item_name_for_log}' ha sido RECHAZADA.";
+        $log_details = "Su solicitud para {$action_text} el ítem '{$item_name_for_log}' ha sido RECHAZADA.";
     }
 
     if (!empty($review_comment)) {
@@ -114,7 +94,7 @@ try {
 
     $conn->commit();
     $response['success'] = true;
-    $response['message'] = "La solicitud ha sido marcada como '{$review_status}'. Se ha notificado al usuario y la acción ha sido ejecutada.";
+    $response['message'] = "La solicitud ha sido marcada como '{$review_status}'. Se ha notificado al usuario.";
 
 } catch (Exception $e) {
     $conn->rollback();
